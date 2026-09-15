@@ -1,0 +1,11 @@
+{
+  "data_root": "D:/自动备份/Qwen work/自动化（OA流程）",
+  "ledger_oa": "事项审批发起台账.xlsx",
+  "ledger_sg": "申购单需求台账.xlsx",
+  "inbox_rel": "OA附件库/发起收件箱",
+  "template_rel": "OA附件库/模板",
+  "staging_rel": "OA附件库/待发起",
+  "archive_rel": "OA附件库/文档整理/采购项目档案",
+  "profile_rel": "oa_pilot/edge_profile",
+  "state_rel": "oa_pilot/state"
+}
