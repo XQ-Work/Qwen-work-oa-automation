@@ -81,6 +81,10 @@ def cmd_gen(a):
         raise SystemExit(f"模板缺失：{tpl}")
 
     low = quotes[0]
+    req_note = a.要求 or (matter["note"] if matter and matter["note"] else "")
+    if a.要求 and matter:
+        conn.execute("UPDATE matter SET note=? WHERE id=?", (a.要求, matter["id"]))
+        conn.commit()
     out_dir = archive_dir_for(a.事项)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_doc = out_dir / f"比质比价报告单（{product}）.doc"
@@ -96,14 +100,19 @@ def cmd_gen(a):
         for i, q in enumerate(quotes):
             r = i + 2
             table.Cell(r, 1).Range.Text = q["supplier_name"]
-            name_text = product if is_service else f"{product}（详情见附件清单）"
+            if is_service:
+                # 服务模板：品名第二行带简洁服务要求（书写区域有限，要求务必简短）
+                name_text = product + (f"\r{req_note}" if req_note else "")
+            else:
+                name_text = f"{product}（详情见附件清单）"
             table.Cell(r, 2).Range.Text = name_text
             table.Cell(r, 3).Range.Text = q["unit"] or ""
             table.Cell(r, 4).Range.Text = q["qty"] or ""
             table.Cell(r, 5).Range.Text = q["price"] or ""
         tail = f"单价{low['price']}" if is_service else f"总价{low['price']}元"
+        # 说明句按旧规则使用事项名
         comparison = (
-            f"根据事项审批及供应商报价单，{product}比质比价详情如下：\n"
+            f"根据事项审批及供应商报价单，{a.事项}比质比价详情如下：\n"
             "1.经查询上述三家供应商均符合采购方案资质要求。\n"
             "2.上述报价包含：设备、税费、运杂费、保险费、质保、售后服务等一切费用。\n"
             f"3.综合价格对比建议采纳{low['supplier_name']}，{tail}。")
@@ -147,6 +156,7 @@ def main():
     p3.add_argument("--事项", required=True)
     p3.add_argument("--类别", choices=["批量", "服务"], default="")
     p3.add_argument("--品名", default="")
+    p3.add_argument("--要求", default="", help="服务类品名列第二行的简洁服务要求")
     p3.set_defaults(fn=cmd_gen)
     a = ap.parse_args()
     a.fn(a)
