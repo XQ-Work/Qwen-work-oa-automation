@@ -16,7 +16,8 @@
 |---|---|---|
 | modules/m01_shxiang | 事项审批一条龙（070801）：台账→登录→填表→附件→存草稿→归档回写 | `python modules/m01_shxiang/fill_oa.py --row N --save`；收件箱识别 `intake.py scan/add` |
 | modules/m02_sggen | 申购单生成：需求台账→套模板→落收件箱 | `python modules/m02_sggen/make_sg.py --ledger` |
-| oa_common | 路径/凭据公共库（keyring 服务名 qwenwork-oa-tus-sound） | 内部引用 |
+| modules/m03_bizhijie | 比质比价报告单生成：SQLite 报价数据→Word 模板填充→归档 03 夹 | `python modules/m03_bizhijie/bizhijie.py add-quote/gen` |
+| oa_common | 路径/凭据/SQLite 公共库（keyring 服务名 qwenwork-oa-tus-sound；库文件 {data_root}/oa_automation.db） | 内部引用 |
 
 ## 环境准备
 
@@ -36,7 +37,7 @@ cp config.example.json config.json               # 改 data_root 指向你的数
 
 - [x] m01 事项审批一条龙
 - [x] m02 申购单生成
-- [ ] m03 比质比价报告单生成
+- [x] m03 比质比价报告单生成（吸收 TRAE 旧方案，输出与历史成品逐格一致）
 - [ ] m04 供应商新增一条龙
 - [ ] m05 合同会签一条龙
 - [ ] m06 付款申请一条龙
