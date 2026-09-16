@@ -287,18 +287,48 @@ def process(r, save):
                     step("点保存", True)
                 except Exception as e:
                     step("点保存", False, e)
-                reqid, ok = "", False
-                for _ in range(20):
-                    time.sleep(1.5)
+                reqid, ok, dup = "", False, False
+                saw_saving = False
+                for i in range(60):  # 最多约 120s
+                    time.sleep(2)
+                    try:
+                        body = page.inner_text("body")
+                    except Exception:
+                        body = ""
+                    if any(k in body for k in ("相同供应商", "重复", "已存在")) or \
+                       any(any(k in s for k in ("相同供应商", "重复", "已存在")) for s in signals):
+                        dup = True
+                        break
+                    if "正在保存" in body or "保存中" in body:
+                        saw_saving = True
+                        continue
                     m = re.search(r"requestid=(\d+)", page.url or "", re.I)
                     if m:
                         reqid, ok = m.group(1), True
                         break
-                    if any("成功" in s for s in signals):
+                    if any(("成功" in s) for s in signals):
+                        ok = True
+                        break
+                    # 浮层出现过又消失 = 保存动作完成（requestid 可能未进 URL）
+                    if saw_saving and "正在保存" not in body and "保存中" not in body:
+                        m2 = re.search(r"requestid=(\d+)", page.url or "", re.I)
+                        if m2:
+                            reqid, ok = m2.group(1), True
+                        else:
+                            ok = True  # 保存流程已结束但无编号，交人工确认
+                        break
+                    # 未出现浮层但已离开创建态（如直接跳转）也算
+                    if i > 3 and "AddRequest" not in (page.url or ""):
+                        m3 = re.search(r"requestid=(\d+)", page.url or "", re.I)
+                        reqid = m3.group(1) if m3 else ""
                         ok = True
                         break
                 page.screenshot(path=str(paths.STATE / "supplier_saved.png"),
                                 full_page=True)
+                if dup:
+                    step("保存草稿", False,
+                         "OA提示供应商重复 → 上次保存实际已成功，请到草稿箱核对该供应商流程编号并手工回填台账")
+                    return False
                 step("保存草稿", ok, f"requestid={reqid}" if reqid else "未见编号,看supplier_saved.png")
                 if ok:
                     write_back(r, "已存草稿", reqid)
