@@ -102,9 +102,14 @@ def match_annex_files(supplier):
             if kind not in p.stem:
                 continue
             parens = re.findall(r"[（(]([^（）()]+)[）)]", p.stem)
-            owner = "".join(parens)
-            no = norm(owner)
-            if no and (no in ns or ns in no or ns.startswith(no)):
+            no = norm("".join(parens))
+            owner_ok = bool(no) and (no in ns or ns in no or ns.startswith(no))
+            # 事项审批打印件历史上按事项命名（括号内非供应商名），只认关键词
+            if owner_ok or (kind == "事项审批" and not no):
+                hit = str(p)
+                break
+            if kind == "事项审批" and no and no not in ns and ns not in no:
+                # 括号是事项名：也接受（建档场景收件箱即本批次材料）
                 hit = str(p)
                 break
         if hit:
@@ -114,66 +119,98 @@ def match_annex_files(supplier):
     return found, missing
 
 
-def fill_form(frame, rec, step):
-    # 固定项：公司类型/操作状态/板块/是否内部公司
-    frame.locator(f"select[name={F['公司类型']}]").first.select_option(label="供应商（我方为甲方）")
-    step("公司类型", True)
-    frame.locator(f"select[name={F['操作状态']}]").first.select_option(label="新增")
-    step("操作状态=新增", True)
-    frame.locator(f"select[name={F['板块']}]").first.select_option(label="水务板块")
-    step("所属板块=水务", True)
-    frame.locator(f"select[name={F['是否内部公司']}]").first.select_option(label="否")
-    step("是否内部公司=否", True)
-    # 确定方式（默认比价）
-    method = rec["确定方式"] or "比价"
-    frame.locator(f"select[name={F['确定方式']}]").first.select_option(label=method)
-    step(f"确定方式={method}", True)
-    # 供应商分类勾选
+def build_plan(rec):
+    """填值计划：(kind, 字段, 期望值, 描述)。父级下拉在前，子级字段在后（对抗级联刷新）"""
+    situation = rec["情况说明"] or f"{rec['名称'][:6]}供应商"
     cb = CATEGORY_CHECKBOX.get(rec["分类"])
     if not cb:
         raise SystemExit(f"分类『{rec['分类']}』不识别（货物类/服务类/工程类/劳务咨询顾问类）")
-    loc = frame.locator(f"input[name={cb}]").first
-    checked = False
-    # 策略1：点 jNice 渲染的相邻样式元素（视觉与原生状态同步）
+    return [
+        ("select", F["公司类型"], "供应商（我方为甲方）", "公司类型"),
+        ("select", F["操作状态"], "新增", "操作状态"),
+        ("select", F["板块"], "水务板块", "所属板块"),
+        ("select", F["是否内部公司"], "否", "是否内部公司"),
+        ("select", F["确定方式"], rec["确定方式"] or "比价", "确定方式"),
+        ("select", F["所属类型"], rec["所属类型"] or "私企", "所属类型"),
+        ("check", cb, "1", f"分类={rec['分类']}"),
+        ("text", F["名称"], rec["名称"], "供应商名称"),
+        ("text", F["法人"], rec["法人"], "法定代表人"),
+        ("text", F["注册资本"], rec["注册资本"], "注册资本"),
+        ("area", F["经营范围"], rec["经营范围"], "经营范围"),
+        ("text", F["电话"], rec["电话"], "电话"),
+        ("text", F["联系人"], rec["联系人"], "联系人"),
+        ("area", F["情况说明"], situation, "情况说明"),
+        ("text", F["开户行"], rec["开户行"], "开户行"),
+        ("text", F["开户行地址"], rec["开户行地址"] or rec["开户行"], "开户行地址"),
+        ("text", F["账号"], rec["账号"], "银行账号"),
+        ("text", F["行号"], rec["行号"] or "\\", "行号"),
+    ]
+
+
+def apply_item(frame, kind, name, expected):
+    if kind == "select":
+        frame.locator(f"select[name={name}]:visible").first.select_option(label=expected)
+    elif kind == "area":
+        frame.locator(f"textarea[name={name}]").first.fill(expected)
+    elif kind == "text":
+        frame.locator(f"input[name={name}]:visible").first.fill(expected)
+    elif kind == "check":
+        loc = frame.locator(f"input[name={name}]").first
+        try:  # 先点 jNice 样式元素（视觉同步）
+            if not loc.is_checked():
+                sib = frame.locator(f"input[name={name}] + *").first
+                if sib.count() > 0:
+                    sib.click(timeout=3000)
+        except Exception:
+            pass
+        try:
+            if not loc.is_checked():
+                loc.evaluate("el => { el.checked = true; "
+                             "el.dispatchEvent(new Event('change',{bubbles:true})); }")
+        except Exception:
+            pass
+
+
+def verify_item(frame, kind, name, expected):
     try:
-        sib = frame.locator(f"input[name={cb}] + *").first
-        if sib.count() > 0:
-            sib.click(timeout=3000)
-            checked = loc.is_checked()
+        if kind == "check":
+            return frame.locator(f"input[name={name}]").first.is_checked()
+        if kind == "select":
+            v = frame.locator(f"select[name={name}]:visible").first.input_value()
+            if v == expected:
+                return True
+            try:  # input_value 是选项value，比对选中项文本
+                t = frame.locator(
+                    f"select[name={name}]:visible option:checked").first.inner_text()
+                return t.strip() == expected.strip()
+            except Exception:
+                return False
+        v = frame.locator(
+            f"input[name={name}]:visible, textarea[name={name}]").first.input_value()
+        return v.strip() == expected.strip()
     except Exception:
-        pass
-    # 策略2：直接改原生 DOM（保存读的是原生值，视觉可能不同步）
-    if not checked:
-        try:
-            loc.evaluate("el => { el.checked = true; "
-                         "el.dispatchEvent(new Event('change', {bubbles:true})); }")
-        except Exception:
-            pass
-        try:
-            checked = loc.is_checked()
-        except Exception:
-            pass
-    if not checked:
-        raise SystemExit(f"分类『{rec['分类']}』勾选失败，请检查表单结构是否变更")
-    step(f"勾选分类={rec['分类']}", True)
-    # 文本/下拉/多行
-    situation = rec["情况说明"] or f"{rec['名称'][:6]}供应商"
-    texts = [("名称", rec["名称"]), ("法人", rec["法人"]), ("注册资本", rec["注册资本"]),
-             ("经营范围", rec["经营范围"]), ("电话", rec["电话"]),
-             ("联系人", rec["联系人"]), ("情况说明", situation)]
-    for key, val in texts:
-        frame.locator(f"[name={F[key]}]").first.fill(val)
-        step(f"填{key}", True, val[:30])
-    frame.locator(f"select[name={F['所属类型']}]").first.select_option(
-        label=rec["所属类型"] or "私企")
-    step("所属类型", True, rec["所属类型"])
-    # 银行四列（地址默认=开户行；行号可占位）
-    frame.locator(f"input[name={F['开户行']}]").first.fill(rec["开户行"])
-    frame.locator(f"input[name={F['开户行地址']}]").first.fill(
-        rec["开户行地址"] or rec["开户行"])
-    frame.locator(f"input[name={F['账号']}]").first.fill(rec["账号"])
-    frame.locator(f"input[name={F['行号']}]").first.fill(rec["行号"] or "\\")
-    step("银行四列", True, f"{rec['开户行']}/{rec['账号']}")
+        return False
+
+
+def fill_form(frame, rec, step):
+    plan = build_plan(rec)
+    for kind, name, expected, desc in plan:
+        apply_item(frame, kind, name, expected)
+    step("首轮填报", True, f"{len(plan)}项")
+    time.sleep(4)  # 等级联刷新收敛
+    # 多轮读回补填（级联会清空子级字段）
+    bad = [it for it in plan if not verify_item(frame, it[0], it[1], it[2])]
+    for rnd in range(3):
+        if not bad:
+            break
+        time.sleep(2)
+        for kind, name, expected, desc in bad:
+            apply_item(frame, kind, name, expected)
+        time.sleep(3)
+        bad = [it for it in plan if not verify_item(frame, it[0], it[1], it[2])]
+    step("读回校验补填", not bad,
+         f"全部{len(plan)}项就位" if not bad
+         else "仍未就位: " + "、".join(it[3] for it in bad))
 
 
 def to_db(rec):
