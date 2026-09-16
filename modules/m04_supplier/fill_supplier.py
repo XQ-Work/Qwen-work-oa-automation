@@ -133,8 +133,28 @@ def fill_form(frame, rec, step):
     if not cb:
         raise SystemExit(f"分类『{rec['分类']}』不识别（货物类/服务类/工程类/劳务咨询顾问类）")
     loc = frame.locator(f"input[name={cb}]").first
-    if not loc.is_checked():
-        loc.check(force=True)
+    checked = False
+    # 策略1：点 jNice 渲染的相邻样式元素（视觉与原生状态同步）
+    try:
+        sib = frame.locator(f"input[name={cb}] + *").first
+        if sib.count() > 0:
+            sib.click(timeout=3000)
+            checked = loc.is_checked()
+    except Exception:
+        pass
+    # 策略2：直接改原生 DOM（保存读的是原生值，视觉可能不同步）
+    if not checked:
+        try:
+            loc.evaluate("el => { el.checked = true; "
+                         "el.dispatchEvent(new Event('change', {bubbles:true})); }")
+        except Exception:
+            pass
+        try:
+            checked = loc.is_checked()
+        except Exception:
+            pass
+    if not checked:
+        raise SystemExit(f"分类『{rec['分类']}』勾选失败，请检查表单结构是否变更")
     step(f"勾选分类={rec['分类']}", True)
     # 文本/下拉/多行
     situation = rec["情况说明"] or f"{rec['名称'][:6]}供应商"
