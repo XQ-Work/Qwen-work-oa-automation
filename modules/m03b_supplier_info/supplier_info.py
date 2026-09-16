@@ -54,17 +54,60 @@ def cmd_show(a):
         print(f"  {label}: {v or '（待补充）'}")
 
 
+def cmd_verify(a):
+    """在线核验：data-file = {供应商: {field: 在线值, ...}}，与执照画像逐字段比对"""
+    data = json.loads(Path(a.data_file).read_text(encoding="utf-8"))
+    conn = db.connect()
+    stat = {"一致": 0, "不一致": 0, "单边缺失": 0}
+    for supplier, online in data.items():
+        p = db.get_profile(conn, supplier)
+        if not p:
+            print(f"[跳过] 无画像记录：{supplier}")
+            continue
+        fixes = {}
+        for key, oval in online.items():
+            if key == "risk":
+                continue
+            lval = p.get(key) or ""
+            n_l, n_o = db.normalize_value(key, lval), db.normalize_value(key, oval)
+            if not n_l:
+                m = "单边缺失"
+            elif n_l == n_o:
+                m = "一致"
+            elif key in ("scope", "address") and (n_o in n_l or n_l in n_o):
+                m = "一致"  # 长文本截断包含视为一致
+            else:
+                m = "不一致"
+            stat[m] += 1
+            db.upsert_verify(conn, supplier, key, lval, oval, m)
+            if m == "不一致" and a.apply:
+                fixes[key] = oval
+        if "risk" in online:
+            fixes["risk"] = online["risk"]
+        if fixes:
+            sets = ", ".join(f"{k}=?" for k in fixes)
+            conn.execute(f"UPDATE supplier_profile SET {sets} WHERE supplier_name=?",
+                         list(fixes.values()) + [supplier])
+            print(f"[修正] {supplier}: {list(fixes)}")
+    conn.commit()
+    print(f"[verify] 比对完成：一致{stat['一致']} 不一致{stat['不一致']} "
+          f"执照缺失{stat['单边缺失']}{'（画像已按官方值修正）' if a.apply else ''}")
+
+
 def cmd_gen(a):
     suppliers = [s.strip() for s in a.供应商.split(",") if s.strip()]
     if len(suppliers) < 2:
         raise SystemExit("至少 2 家供应商")
     conn = db.connect()
     profiles = []
+    verifies = {}
     for s in suppliers:
         p = db.get_profile(conn, s)
         if not p:
             raise SystemExit(f"供应商『{s}』无画像记录，先 set 入库")
         profiles.append(p)
+        verifies[s] = db.get_verifies(conn, s)
+    verified_any = any(verifies[s] for s in suppliers)
 
     doc = Document()
     sec = doc.sections[0]
@@ -106,12 +149,31 @@ def cmd_gen(a):
         for j, p in enumerate(profiles):
             v = p["supplier_name"] if key == "name" else p.get(key)
             size = 9 if key == "scope" else 10.5
-            fill(table.cell(i, j + 1), v, size=size, center=(key != "scope"))
+            mark = ""
+            if key != "name":
+                vf = verifies.get(p["supplier_name"], {}).get(key)
+                if vf:
+                    if vf["match"] == "一致":
+                        mark = "  ✓"
+                    elif vf["match"] == "不一致":
+                        v = f"{v}\n(执照:{vf['license_value'] or '—'})\n(官方:{vf['online_value']})"
+                        mark = "  ✗"
+                    elif vf["match"] == "单边缺失":
+                        mark = "  （网络核验补充）"
+                elif key == "risk":
+                    v = v or "无"
+            fill(table.cell(i, j + 1), (str(v or "（待补充）") + mark) if key != "scope"
+                 else (str(v or "（待补充）") + mark), size=size, center=(key != "scope"))
 
     note = doc.add_paragraph()
-    _set_font(note.add_run("注：以上信息来源于国家企业信用信息公示系统及营业执照扫描件。"
-                           "经对比上述供应商均依法登记注册、经营状态正常，其经营范围涵盖本次采购内容，"
-                           "符合采购方案资质要求。"), 10.5)
+    if verified_any:
+        _set_font(note.add_run("注：以上信息以营业执照扫描件为基准，经与天眼查工商登记信息交叉核验。"
+                               "✓表示执照与官方登记一致，✗表示存在差异（并列示两值，请以官方登记为准核实）。"
+                               "上述供应商登记状态正常、经营范围涵盖本次采购内容，符合采购方案资质要求。"), 10.5)
+    else:
+        _set_font(note.add_run("注：以上信息来源于国家企业信用信息公示系统及营业执照扫描件。"
+                               "经对比上述供应商均依法登记注册、经营状态正常，其经营范围涵盖本次采购内容，"
+                               "符合采购方案资质要求。"), 10.5)
 
     out_dir = Path(a.out_dir) if a.out_dir else archive.project_dir(a.事项) / "02_供应商报价及资质"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -134,6 +196,11 @@ def main():
     p1.add_argument("--data-file", required=True)
     p1.add_argument("--source", default="")
     p1.set_defaults(fn=cmd_set)
+    pv = sub.add_parser("verify")
+    pv.add_argument("--data-file", required=True)
+    pv.add_argument("--apply", action="store_true",
+                    help="不一致字段以官方值修正画像")
+    pv.set_defaults(fn=cmd_verify)
     p2 = sub.add_parser("show")
     p2.add_argument("--供应商", required=True)
     p2.set_defaults(fn=cmd_show)

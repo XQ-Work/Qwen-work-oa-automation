@@ -30,12 +30,18 @@ CREATE TABLE IF NOT EXISTS supplier_profile(
   supplier_name TEXT PRIMARY KEY, credit_code TEXT, type TEXT,
   legal_person TEXT, reg_capital TEXT, reg_date TEXT, approval_date TEXT,
   status TEXT, address TEXT, scope TEXT, shareholders TEXT,
-  source TEXT, updated_at TEXT);
+  risk TEXT, source TEXT, updated_at TEXT);
+CREATE TABLE IF NOT EXISTS supplier_verify(
+  id INTEGER PRIMARY KEY, supplier_name TEXT NOT NULL, field TEXT NOT NULL,
+  license_value TEXT, online_value TEXT,
+  match TEXT CHECK(match IN ('一致','不一致','单边缺失','待核')),
+  online_source TEXT, verified_at TEXT,
+  UNIQUE(supplier_name, field));
 """
 
 PROFILE_FIELDS = ["credit_code", "type", "legal_person", "reg_capital",
                   "reg_date", "approval_date", "status", "address",
-                  "scope", "shareholders"]
+                  "scope", "shareholders", "risk"]
 
 # 报告行定义：(显示名, 字段key)；名称列用供应商名本身
 PROFILE_LABELS = [
@@ -43,7 +49,7 @@ PROFILE_LABELS = [
     ("法定代表人（经营者）", "legal_person"), ("注册资本", "reg_capital"),
     ("成立日期（注册日期）", "reg_date"), ("核准日期", "approval_date"),
     ("经营状态", "status"), ("经营场所", "address"), ("经营范围", "scope"),
-    ("股东（出资情况）", "shareholders"),
+    ("股东（出资情况）", "shareholders"), ("风险线索", "risk"),
 ]
 
 
@@ -55,7 +61,64 @@ def connect():
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
+    try:  # 旧库补列
+        conn.execute("ALTER TABLE supplier_profile ADD COLUMN risk TEXT")
+    except sqlite3.OperationalError:
+        pass
     return conn
+
+
+def normalize_value(key, v):
+    """比对前归一化：统一日期、金额、空白与全半角括号"""
+    import re
+    s = str(v or "").strip().replace("（", "(").replace("）", ")")
+    if not s:
+        return ""
+    if key in ("reg_date", "approval_date"):
+        m = re.search(r"(\d{4})[年./\-]?(\d{1,2})[月./\-]?(\d{1,2})", s)
+        if m:
+            return f"{int(m.group(1)):04d}{int(m.group(2)):02d}{int(m.group(3)):02d}"
+        return s
+    if key == "reg_capital":
+        m = re.search(r"([0-9.]+)\s*万", s)
+        if m:
+            return f"{float(m.group(1)):.0f}万"
+        cn = {"壹":1,"贰":2,"叁":3,"肆":4,"伍":5,"陆":6,"柒":7,"捌":8,"玖":9,"拾":10,
+              "佰":100,"仟":1000,"万":10000,"亿":100000000,"零":0}
+        digits = re.findall(r"[壹贰叁肆伍陆柒捌玖拾佰仟万亿零]", s)
+        if digits:
+            total, section, num = 0, 0, 0
+            for ch in digits:
+                v2 = cn[ch]
+                if v2 >= 10000:
+                    section = (section + num) * v2
+                    total += section
+                    section = num = 0
+                elif v2 >= 10:
+                    section += num * v2
+                    num = 0
+                else:
+                    num = v2
+            return f"{(total + section + num)/10000:.0f}万"
+        return s
+    return re.sub(r"\s+", "", s)
+
+
+def upsert_verify(conn, supplier, field, license_value, online_value,
+                  match, source="天眼查"):
+    conn.execute(
+        "INSERT INTO supplier_verify(supplier_name,field,license_value,online_value,"
+        "match,online_source,verified_at) VALUES(?,?,?,?,?,?,?) "
+        "ON CONFLICT(supplier_name,field) DO UPDATE SET license_value=excluded.license_value,"
+        "online_value=excluded.online_value,match=excluded.match,"
+        "online_source=excluded.online_source,verified_at=excluded.verified_at",
+        (supplier, field, license_value, online_value, match, source, now()))
+
+
+def get_verifies(conn, supplier):
+    rows = conn.execute("SELECT * FROM supplier_verify WHERE supplier_name=?",
+                        (supplier,)).fetchall()
+    return {r["field"]: dict(r) for r in rows}
 
 
 def get_or_create_matter(conn, name, category="", note=""):
