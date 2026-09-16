@@ -26,7 +26,25 @@ CREATE TABLE IF NOT EXISTS report(
 CREATE TABLE IF NOT EXISTS oa_flow(
   id INTEGER PRIMARY KEY, matter_id INT, flow_type TEXT NOT NULL,
   requestid TEXT, title TEXT, status TEXT, created_at TEXT);
+CREATE TABLE IF NOT EXISTS supplier_profile(
+  supplier_name TEXT PRIMARY KEY, credit_code TEXT, type TEXT,
+  legal_person TEXT, reg_capital TEXT, reg_date TEXT, approval_date TEXT,
+  status TEXT, address TEXT, scope TEXT, shareholders TEXT,
+  source TEXT, updated_at TEXT);
 """
+
+PROFILE_FIELDS = ["credit_code", "type", "legal_person", "reg_capital",
+                  "reg_date", "approval_date", "status", "address",
+                  "scope", "shareholders"]
+
+# 报告行定义：(显示名, 字段key)；名称列用供应商名本身
+PROFILE_LABELS = [
+    ("统一社会信用代码", "credit_code"), ("名称", "name"), ("类型", "type"),
+    ("法定代表人（经营者）", "legal_person"), ("注册资本", "reg_capital"),
+    ("成立日期（注册日期）", "reg_date"), ("核准日期", "approval_date"),
+    ("经营状态", "status"), ("经营场所", "address"), ("经营范围", "scope"),
+    ("股东（出资情况）", "shareholders"),
+]
 
 
 def now():
@@ -49,6 +67,24 @@ def get_or_create_matter(conn, name, category="", note=""):
     cur = conn.execute("INSERT INTO matter(name,category,note,created_at) VALUES(?,?,?,?)",
                        (name, category, note, now()))
     return cur.lastrowid
+
+
+def upsert_profile(conn, supplier, data, source=""):
+    cols = ["supplier_name"] + PROFILE_FIELDS
+    vals = [supplier] + [data.get(f) or "" for f in PROFILE_FIELDS]
+    updates = ", ".join(f"{f}=excluded.{f}" for f in PROFILE_FIELDS)
+    conn.execute(
+        "INSERT INTO supplier_profile(" + ", ".join(cols) + ",source,updated_at) "
+        "VALUES(" + ", ".join(["?"] * (len(cols) + 2)) + ") "
+        "ON CONFLICT(supplier_name) DO UPDATE SET " + updates +
+        ",source=excluded.source,updated_at=excluded.updated_at",
+        vals + [source, now()])
+
+
+def get_profile(conn, supplier):
+    row = conn.execute("SELECT * FROM supplier_profile WHERE supplier_name=?",
+                       (supplier,)).fetchone()
+    return dict(row) if row else None
 
 
 def add_quote(conn, matter_name, supplier, unit, qty, price, price_num=None,

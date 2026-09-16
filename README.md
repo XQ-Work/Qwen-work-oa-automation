@@ -17,7 +17,8 @@
 | modules/m01_shxiang | 事项审批一条龙（070801）：台账→登录→填表→附件→存草稿→归档回写 | `python modules/m01_shxiang/fill_oa.py --row N --save`；收件箱识别 `intake.py scan/add` |
 | modules/m02_sggen | 申购单生成：需求台账→套模板→落收件箱 | `python modules/m02_sggen/make_sg.py --ledger` |
 | modules/m03_bizhijie | 比质比价报告单生成：SQLite 报价数据→Word 模板填充→归档 03 夹 | `python modules/m03_bizhijie/bizhijie.py add-quote/gen` |
-| oa_common | 路径/凭据/SQLite 公共库（keyring 服务名 qwenwork-oa-tus-sound；库文件 {data_root}/oa_automation.db） | 内部引用 |
+| modules/m03b_supplier_info | 供应商信息查询对比报告：企业画像入 SQLite（跨事项复用），生成横向对比 Word 表（行=查询项，列=供应商） | `python modules/m03b_supplier_info/supplier_info.py set/gen` |
+| oa_common | 路径/凭据/SQLite 公共库/项目夹定位(archive)（keyring 服务名 qwenwork-oa-tus-sound；库文件 {data_root}/oa_automation.db） | 内部引用 |
 
 ## 环境准备
 
