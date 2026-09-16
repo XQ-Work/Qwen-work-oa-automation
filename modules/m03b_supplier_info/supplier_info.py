@@ -66,7 +66,13 @@ def cmd_verify(a):
             continue
         fixes = {}
         for key, oval in online.items():
-            if key == "risk":
+            if key in ("risk", "verify3"):
+                # 风险线索、三要素结论：官方直接给出，不做执照比对，直接采信
+                fixes[key] = oval
+                db.upsert_verify(conn, supplier, key, "", oval,
+                                 "一致" if key == "verify3" and "一致" in oval and "不一致" not in oval
+                                 else ("不一致" if key == "verify3" else "一致"),
+                                 "天眼查三要素" if key == "verify3" else "天眼查")
                 continue
             lval = p.get(key) or ""
             n_l, n_o = db.normalize_value(key, lval), db.normalize_value(key, oval)
@@ -82,8 +88,6 @@ def cmd_verify(a):
             db.upsert_verify(conn, supplier, key, lval, oval, m)
             if m == "不一致" and a.apply:
                 fixes[key] = oval
-        if "risk" in online:
-            fixes["risk"] = online["risk"]
         if fixes:
             sets = ", ".join(f"{k}=?" for k in fixes)
             conn.execute(f"UPDATE supplier_profile SET {sets} WHERE supplier_name=?",

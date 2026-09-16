@@ -39,13 +39,15 @@ CREATE TABLE IF NOT EXISTS supplier_verify(
   UNIQUE(supplier_name, field));
 """
 
-PROFILE_FIELDS = ["credit_code", "type", "legal_person", "reg_capital",
+PROFILE_FIELDS = ["credit_code", "verify3", "type", "legal_person", "reg_capital",
                   "reg_date", "approval_date", "status", "address",
                   "scope", "shareholders", "risk"]
 
 # 报告行定义：(显示名, 字段key)；名称列用供应商名本身
 PROFILE_LABELS = [
-    ("统一社会信用代码", "credit_code"), ("名称", "name"), ("类型", "type"),
+    ("统一社会信用代码", "credit_code"),
+    ("三要素验证（名称+代码+法人）", "verify3"),
+    ("名称", "name"), ("类型", "type"),
     ("法定代表人（经营者）", "legal_person"), ("注册资本", "reg_capital"),
     ("成立日期（注册日期）", "reg_date"), ("核准日期", "approval_date"),
     ("经营状态", "status"), ("经营场所", "address"), ("经营范围", "scope"),
@@ -61,10 +63,11 @@ def connect():
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
-    try:  # 旧库补列
-        conn.execute("ALTER TABLE supplier_profile ADD COLUMN risk TEXT")
-    except sqlite3.OperationalError:
-        pass
+    for col in ("risk", "verify3"):  # 旧库补列
+        try:
+            conn.execute(f"ALTER TABLE supplier_profile ADD COLUMN {col} TEXT")
+        except sqlite3.OperationalError:
+            pass
     return conn
 
 
