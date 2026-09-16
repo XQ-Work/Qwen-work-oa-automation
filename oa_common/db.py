@@ -30,7 +30,11 @@ CREATE TABLE IF NOT EXISTS supplier_profile(
   supplier_name TEXT PRIMARY KEY, credit_code TEXT, type TEXT,
   legal_person TEXT, reg_capital TEXT, reg_date TEXT, approval_date TEXT,
   status TEXT, address TEXT, scope TEXT, shareholders TEXT,
-  risk TEXT, source TEXT, updated_at TEXT);
+  risk TEXT, verify3 TEXT,
+  category TEXT, confirm_method TEXT, situation TEXT,
+  phone TEXT, contact TEXT, bank_name TEXT, bank_addr TEXT,
+  bank_account TEXT, bank_code TEXT,
+  source TEXT, updated_at TEXT);
 CREATE TABLE IF NOT EXISTS supplier_verify(
   id INTEGER PRIMARY KEY, supplier_name TEXT NOT NULL, field TEXT NOT NULL,
   license_value TEXT, online_value TEXT,
@@ -41,7 +45,9 @@ CREATE TABLE IF NOT EXISTS supplier_verify(
 
 PROFILE_FIELDS = ["credit_code", "verify3", "type", "legal_person", "reg_capital",
                   "reg_date", "approval_date", "status", "address",
-                  "scope", "shareholders", "risk"]
+                  "scope", "shareholders", "risk",
+                  "category", "confirm_method", "situation", "phone", "contact",
+                  "bank_name", "bank_addr", "bank_account", "bank_code"]
 
 # 报告行定义：(显示名, 字段key)；名称列用供应商名本身
 PROFILE_LABELS = [
@@ -63,7 +69,9 @@ def connect():
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
-    for col in ("risk", "verify3"):  # 旧库补列
+    for col in ("risk", "verify3", "category", "confirm_method", "situation",
+                "phone", "contact", "bank_name", "bank_addr",
+                "bank_account", "bank_code"):  # 旧库补列
         try:
             conn.execute(f"ALTER TABLE supplier_profile ADD COLUMN {col} TEXT")
         except sqlite3.OperationalError:
