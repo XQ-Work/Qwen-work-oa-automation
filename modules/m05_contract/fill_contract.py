@@ -49,6 +49,13 @@ F = {"所属板块": "field41343", "水务板块": "field41366", "项目状态W"
 # 甲方=本公司，供应商浏览框里的记录ID(实测捕获)；用于 JS 直填、不走易卡的弹窗
 COMPANY_SUPPLIER_ID = {"荆州浦华荆清水务有限公司": "18404"}
 
+# 本公司其它固定浏览器字段 → 记录ID(实测捕获)，同样 JS 直填
+FIXED_FIELD_IDS = {
+    "field41307": "1528",    # 印章类型
+    "field106131": "325",    # 印章所属分部
+    "field378630": "325",    # 合同关联分部甲
+}
+
 
 def read_row(r):
     wb = load_workbook(LEDGER, data_only=True)
@@ -382,6 +389,15 @@ def browser_select(page, frame, fid, keyword, tag):
         return False
 
 
+def _contract_name(rec):
+    """合同名称=事项名称(关联关键词)+后缀；场景含'服务'→服务合同，否则→采购合同"""
+    subj = (rec.get("关联关键词") or rec.get("合同名称") or "").strip()
+    if not subj:
+        return ""
+    suffix = "服务合同" if "服务" in (rec.get("场景") or "") else "采购合同"
+    return subj + suffix
+
+
 def build_steps(rec, br):
     """严格级联顺序：所属板块→水务板块→项目状态W/种类→板块事项审批→投资类型
     →采购类/人员所属→关联审批(放大镜)→项目状态→项目类型→合同三下拉→文本
@@ -404,7 +420,7 @@ def build_steps(rec, br):
     steps.append(("sel", F["合同内容"], br["合同内容"]))
     steps.append(("sel", F["合同所属类型"], br["合同所属类型"]))
     steps.append(("sel", F["合同类型"], br["合同类型"]))
-    steps.append(("txt", F["新合同名称"], rec["合同名称"]))
+    steps.append(("txt", F["新合同名称"], _contract_name(rec)))
     steps.append(("txt", F["合同总金额"], f"{float(rec['金额']):.2f}" if rec["金额"] else ""))
     steps.append(("sel", F["母合同"], "否"))
     _jid = COMPANY_SUPPLIER_ID.get(rec["甲方"])
@@ -415,11 +431,16 @@ def build_steps(rec, br):
     steps.append(("browser", F["乙方"], rec["乙方"]))
     steps.append(("sel", F["债权类"], "否"))
     steps.append(("sel", F["报装"], "否"))
-    steps.append(("area", F["摘要"], rec["摘要覆盖"] or rec["合同名称"]))
-    steps.append(("browser", F["印章类型"], rec["甲方"] + "合同专用章"))
-    steps.append(("browser", F["印章分部"], rec["甲方"]))
-    steps.append(("browser", F["合同关联分部甲"], rec["甲方"]))
-    steps.append(("txt", F["文档名称"], rec["合同名称"]))
+    steps.append(("area", F["摘要"], rec["摘要覆盖"] or _contract_name(rec)))
+    for _key, _nm in (("印章类型", rec["甲方"] + "合同专用章"),
+                      ("印章分部", rec["甲方"]),
+                      ("合同关联分部甲", rec["甲方"])):
+        _fid = F[_key]
+        if _jid and _fid in FIXED_FIELD_IDS:
+            steps.append(("jsid", _fid, (FIXED_FIELD_IDS[_fid], _nm)))
+        else:
+            steps.append(("browser", _fid, _nm))
+    steps.append(("txt", F["文档名称"], _contract_name(rec)))
     steps.append(("sel", F["法人章"], "否"))
     return steps
 
