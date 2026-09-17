@@ -242,7 +242,9 @@ def main():
         return
 
     target = Path(args.out) if args.out else LEDGER
-    vals = {2: scene, 3: keyword + ("服务合同" if scene == "服务" else "采购合同"),
+    # 场景(B列)不自动写：只抽到粗类“货物/服务”，而 m05 靠细类精确匹配分支映射表，
+    # 留人工选。合同名称(C)的“服务/采购合同”后缀仍按抽到的 scene 生成。
+    vals = {3: keyword + ("服务合同" if scene == "服务" else "采购合同"),
             4: rec["含税总价"], 5: rec["甲方"], 6: rec["乙方"], 7: keyword,
             9: summary, 10: str(path.resolve()), 11: "待确认"}
     wb = load_workbook(target)
