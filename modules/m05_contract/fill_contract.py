@@ -25,7 +25,7 @@ WF = "476402"
 ADD = ("/workflow/request/AddRequest.jsp?workflowid=" + WF +
        "&isagent=0&beagenter=0&f_weaver_belongto_userid=")
 KEEP_OPEN_SECONDS = 30
-BROWSER = False  # 默认不自动进放大镜弹窗(易卡),留人工;--browser 才尝试
+BROWSER = True  # 默认自动填放大镜(行内联想已稳);--no-browser 才跳过留人工
 
 L = {  # 台账列
     2: "场景", 3: "合同名称", 4: "金额", 5: "甲方", 6: "乙方", 7: "关联关键词",
@@ -261,128 +261,43 @@ def set_field_by_id(frame, fid, id_val, name_val):
 
 
 def browser_select(page, frame, fid, keyword, tag):
-    """放大镜选择：触发 onShowBrowser2 开弹窗 -> 全页找【可见】searchName 框(隐藏预建帧
-    的不可见,天然唯一) -> 填简称 -> 点搜索 -> 点结果 <a>(点行即回填关闭)。"""
+    """行内联想选供应商：点字段框→打全称→退格删1字触发→等下拉→点含前缀的项→回读校验。"""
     try:
-        expr = _browser_expr(frame.content(), fid)
-        if not expr:
-            print(f"[browser {tag}] 未找到 onShowBrowser2 表达式", flush=True)
+        box = frame.locator(f"#innerContent{fid}div")
+        if box.count() == 0:
+            box = frame.locator(f"td[id={fid}_tdwrap]")
+        if box.count() == 0:
+            print(f"[browser {tag}] 找不到联想框", flush=True)
             return False
-        try:
-            frame.evaluate("() => { %s; }" % expr)
-        except Exception as e:
-            print(f"[browser {tag}] evaluate 异常 {str(e)[:120]}", flush=True)
-        kw = _jianming(keyword)
-        sframe = None
-        deadline = time.time() + 12
-        while time.time() < deadline:
-            time.sleep(0.7)
-            for f in page.frames:
-                try:
-                    if f.locator("input[name=searchName]:visible").count() > 0:
-                        sframe = f
-                        break
-                except Exception:
-                    continue
-            if sframe:
-                break
-        if sframe is None:
-            print(f"[browser {tag}] 未见可见 searchName n_frames={len(page.frames)}",
-                  flush=True)
+        box.first.click(force=True, timeout=6000)
+        page.keyboard.type(keyword, delay=90)
+        page.keyboard.press("Backspace")   # 删1字触发 keyup 联想查询
+        time.sleep(1.8)
+        pre = keyword[:4] if len(keyword) > 4 else keyword
+        picked = False
+        for sel in ("li", "a", "td", "div"):
             try:
-                page.screenshot(path=str(paths.STATE / f"browser_{tag}_fail.png"),
-                                full_page=False)
+                loc = frame.locator(f"{sel}:visible").filter(has_text=pre)
+                if loc.count() > 0:
+                    loc.first.click(force=True, timeout=3000)
+                    picked = True
+                    break
             except Exception:
-                pass
-            return False
-        time.sleep(1)
-        try:
-            nvis = sum(1 for f in page.frames
-                       if f.locator("input[name=searchName]:visible").count() > 0)
-            print(f"[diag {tag}] sframe.url={sframe.url[:30]} 可见searchName帧数={nvis}",
-                  flush=True)
-        except Exception:
-            pass
-        sn = sframe.locator("input[name=searchName]:visible").first
-        try:
-            sn.fill(kw)
-        except Exception:
-            try:
-                sn.type(kw, delay=30)
-            except Exception:
-                pass
-
-        def _try_select():
-            pool = _desc(sframe) + [f for f in page.frames
-                                    if f is not frame and f is not sframe]
-            for f in pool:
-                try:
-                    a = f.locator("a").filter(has_text=keyword)
-                    if a.count() == 0:
-                        a = f.locator("a").filter(has_text=kw)
-                    cnt = a.count()
-                except Exception:
-                    continue
-                for k in range(min(cnt, 5)):
-                    try:
-                        bb = a.nth(k).bounding_box()
-                        if not bb:
-                            continue
-                        page.mouse.click(bb["x"] + 6, bb["y"] + bb["height"] / 2)
-                        time.sleep(1.5)
-                        try:
-                            v = frame.locator(f"input[name={fid}]").first.input_value()
-                        except Exception:
-                            v = ""
-                        if v:
-                            return v
-                    except Exception:
-                        continue
-            return ""
-
-        def _attempt(f, how):
-            try:
-                if how == "img":
-                    f.locator("span.searchImg, img[src*='search-input'],"
-                              " .e8_btn_top_first").first.click(timeout=1500)
-                elif how == "js":
-                    f.evaluate("() => { try{onBtnSearchClick()}catch(e){} }")
-                elif how == "btn":
-                    f.get_by_text("搜索").first.click(timeout=1500)
-                elif how == "enter":
-                    sn.press("Enter")
-                return True
-            except Exception:
-                return False
-
-        seq = [("img", sframe), ("js", sframe), ("btn", sframe), ("enter", sframe)]
-        for f in page.frames:
-            if f is sframe:
                 continue
-            u = (f.url or "").lower()
-            if any(k in u for k in ("formmode", "browsermain", "commonbrowser",
-                                    "systeminfo/b")):
-                seq += [("img", f), ("js", f), ("btn", f)]
-        for how, f in seq:
-            if not _attempt(f, how):
-                continue
-            time.sleep(2.2)
-            val = _try_select()
-            if val:
-                print(f"[browser {tag}] 选中成功 via {how}@{f.url[:14]} val={val}",
-                      flush=True)
-                try:
-                    page.screenshot(path=str(paths.STATE / f"browser_{tag}_result.png"),
-                                    full_page=False)
-                except Exception:
-                    pass
-                return True
+        time.sleep(1.5)
         try:
-            page.screenshot(path=str(paths.STATE / f"browser_{tag}_result.png"),
+            v = frame.locator(f"input[name={fid}]").first.input_value()
+        except Exception:
+            v = ""
+        if v:
+            print(f"[browser {tag}] 联想选中 val={v}", flush=True)
+            return True
+        print(f"[browser {tag}] 联想未命中(前缀{pre} picked={picked})", flush=True)
+        try:
+            page.screenshot(path=str(paths.STATE / f"browser_{tag}_fail.png"),
                             full_page=False)
         except Exception:
             pass
-        print(f"[browser {tag}] 未能选中(简称{kw})", flush=True)
         return False
     except Exception as e:
         print(f"[browser-fail {tag}] {str(e)[:150]}", flush=True)
@@ -506,10 +421,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--row", type=int, required=True)
     ap.add_argument("--save", action="store_true")
-    ap.add_argument("--browser", action="store_true",
-                    help="尝试自动填放大镜字段(默认跳过,留人工)")
+    ap.add_argument("--no-browser", action="store_true",
+                    help="跳过放大镜字段(留人工);默认自动填")
     args = ap.parse_args()
-    BROWSER = args.browser
+    BROWSER = not args.no_browser
     rec = read_row(args.row)
     br = read_branch(rec["场景"])
     report = {"row": args.row, "rec": rec, "branch": br, "steps": []}
