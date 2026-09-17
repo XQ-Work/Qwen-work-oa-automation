@@ -46,6 +46,9 @@ F = {"所属板块": "field41343", "水务板块": "field41366", "项目状态W"
      "合同关联分部甲": "field378630",
      "监印人": "field316130", "文档名称": "field106130", "法人章": "field106133"}
 
+# 甲方=本公司，供应商浏览框里的记录ID(实测捕获)；用于 JS 直填、不走易卡的弹窗
+COMPANY_SUPPLIER_ID = {"荆州浦华荆清水务有限公司": "18404"}
+
 
 def read_row(r):
     wb = load_workbook(LEDGER, data_only=True)
@@ -233,6 +236,23 @@ def _jianming(name):
     return s[:4] if len(s) > 4 else s
 
 
+def set_field_by_id(frame, fid, id_val, name_val):
+    """JS 直填浏览器字段：隐藏值框=fid 存ID、显示框=fid__ 存名称、名称span 同步。
+    表单帧 evaluate 传参会撞 e-cology 上下文坑(refs.set)，故把值内联进纯字符串。"""
+    js = ("(function(){var fid=%s,idv=%s,nm=%s;"
+          "var h=document.querySelector('input[name=\"'+fid+'\"]');"
+          "var d=document.querySelector('input[name=\"'+fid+'__\"]');"
+          "if(h){h.value=idv;}"
+          "if(d){d.value=nm;}"
+          "var sp=document.getElementById(fid+'span');"
+          "if(sp){sp.innerHTML='<span class=\"e8_showNameClass\">'+nm+'</span>';}"
+          "})()") % (json.dumps(fid), json.dumps(str(id_val)), json.dumps(str(name_val)))
+    try:
+        frame.evaluate(js)
+    except Exception as e:
+        print(f"[jsid {fid}] evaluate 异常 {str(e)[:100]}", flush=True)
+
+
 def browser_select(page, frame, fid, keyword, tag):
     """放大镜选择：触发 onShowBrowser2 开弹窗 -> 全页找【可见】searchName 框(隐藏预建帧
     的不可见,天然唯一) -> 填简称 -> 点搜索 -> 点结果 <a>(点行即回填关闭)。"""
@@ -269,6 +289,13 @@ def browser_select(page, frame, fid, keyword, tag):
                 pass
             return False
         time.sleep(1)
+        try:
+            nvis = sum(1 for f in page.frames
+                       if f.locator("input[name=searchName]:visible").count() > 0)
+            print(f"[diag {tag}] sframe.url={sframe.url[:30]} 可见searchName帧数={nvis}",
+                  flush=True)
+        except Exception:
+            pass
         sn = sframe.locator("input[name=searchName]:visible").first
         try:
             sn.fill(kw)
@@ -277,42 +304,78 @@ def browser_select(page, frame, fid, keyword, tag):
                 sn.type(kw, delay=30)
             except Exception:
                 pass
-        for g in [sframe] + [x for x in page.frames if x is not sframe]:
+
+        def _try_select():
+            pool = _desc(sframe) + [f for f in page.frames
+                                    if f is not frame and f is not sframe]
+            for f in pool:
+                try:
+                    a = f.locator("a").filter(has_text=keyword)
+                    if a.count() == 0:
+                        a = f.locator("a").filter(has_text=kw)
+                    cnt = a.count()
+                except Exception:
+                    continue
+                for k in range(min(cnt, 5)):
+                    try:
+                        bb = a.nth(k).bounding_box()
+                        if not bb:
+                            continue
+                        page.mouse.click(bb["x"] + 6, bb["y"] + bb["height"] / 2)
+                        time.sleep(1.5)
+                        try:
+                            v = frame.locator(f"input[name={fid}]").first.input_value()
+                        except Exception:
+                            v = ""
+                        if v:
+                            return v
+                    except Exception:
+                        continue
+            return ""
+
+        def _attempt(f, how):
             try:
-                g.get_by_text("搜索", exact=True).first.click(timeout=2000)
-                break
+                if how == "img":
+                    f.locator("span.searchImg, img[src*='search-input'],"
+                              " .e8_btn_top_first").first.click(timeout=1500)
+                elif how == "js":
+                    f.evaluate("() => { try{onBtnSearchClick()}catch(e){} }")
+                elif how == "btn":
+                    f.get_by_text("搜索").first.click(timeout=1500)
+                elif how == "enter":
+                    sn.press("Enter")
+                return True
             except Exception:
+                return False
+
+        seq = [("img", sframe), ("js", sframe), ("btn", sframe), ("enter", sframe)]
+        for f in page.frames:
+            if f is sframe:
                 continue
-        time.sleep(3)
+            u = (f.url or "").lower()
+            if any(k in u for k in ("formmode", "browsermain", "commonbrowser",
+                                    "systeminfo/b")):
+                seq += [("img", f), ("js", f), ("btn", f)]
+        for how, f in seq:
+            if not _attempt(f, how):
+                continue
+            time.sleep(2.2)
+            val = _try_select()
+            if val:
+                print(f"[browser {tag}] 选中成功 via {how}@{f.url[:14]} val={val}",
+                      flush=True)
+                try:
+                    page.screenshot(path=str(paths.STATE / f"browser_{tag}_result.png"),
+                                    full_page=False)
+                except Exception:
+                    pass
+                return True
         try:
             page.screenshot(path=str(paths.STATE / f"browser_{tag}_result.png"),
                             full_page=False)
         except Exception:
             pass
-        # 选中：点含简称的可见结果行 <a>(排除主表单帧,避免点到标题链接)
-        for f in page.frames:
-            if f is frame:
-                continue
-            try:
-                a = f.locator("a:visible").filter(has_text=kw)
-                if a.count() > 0:
-                    a.first.click(timeout=3000)
-                    time.sleep(1.5)
-                    return True
-            except Exception:
-                continue
-        for f in page.frames:
-            if f is frame:
-                continue
-            try:
-                cell = f.locator("td:visible,div:visible").filter(has_text=kw)
-                if cell.count() > 0:
-                    cell.first.click(timeout=3000)
-                    time.sleep(1.5)
-                    return True
-            except Exception:
-                continue
-        print(f"[browser {tag}] 搜索后无匹配行(简称{kw})", flush=True)
+        print(f"[browser {tag}] 未能选中(简称{kw})", flush=True)
         return False
     except Exception as e:
         print(f"[browser-fail {tag}] {str(e)[:150]}", flush=True)
@@ -344,7 +407,11 @@ def build_steps(rec, br):
     steps.append(("txt", F["新合同名称"], rec["合同名称"]))
     steps.append(("txt", F["合同总金额"], f"{float(rec['金额']):.2f}" if rec["金额"] else ""))
     steps.append(("sel", F["母合同"], "否"))
-    steps.append(("browser", F["甲方"], rec["甲方"]))
+    _jid = COMPANY_SUPPLIER_ID.get(rec["甲方"])
+    if _jid:
+        steps.append(("jsid", F["甲方"], (_jid, rec["甲方"])))
+    else:
+        steps.append(("browser", F["甲方"], rec["甲方"]))
     steps.append(("browser", F["乙方"], rec["乙方"]))
     steps.append(("sel", F["债权类"], "否"))
     steps.append(("sel", F["报装"], "否"))
@@ -378,6 +445,14 @@ def apply_step(page, frame, kind, fid, val, step):
                 return
             sel(frame, fid, val)
             step(f"{fid}", True, str(val))
+        elif kind == "jsid":
+            idv, namev = val
+            set_field_by_id(frame, fid, idv, namev)
+            try:
+                cur = frame.locator(f"input[name={fid}]").first.input_value()
+            except Exception:
+                cur = ""
+            step(f"直填{fid}", cur == str(idv), f"id={cur!r} 期望{idv}")
         elif kind == "txt":
             txt(frame, fid, val)
             step(f"{fid}", True, str(val)[:30])
@@ -427,6 +502,11 @@ def main():
             str(paths.PROFILE), channel="msedge", headless=False,
             args=["--start-maximized"], no_viewport=True)
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        for pg in ctx.pages[1:]:
+            try:
+                pg.close()
+            except Exception:
+                pass
         try:
             base = auth.login(page)
             step("登录", True, base)
