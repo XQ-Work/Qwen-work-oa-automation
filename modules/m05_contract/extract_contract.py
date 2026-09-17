@@ -204,6 +204,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("file")
     ap.add_argument("--commit", action="store_true", help="新增一行回写台账")
+    ap.add_argument("--out", default=None,
+                    help="回写目标台账（默认正式台账；验证时可指向副本）")
     args = ap.parse_args()
 
     path = Path(args.file)
@@ -239,17 +241,27 @@ def main():
         print("（预览模式，未回写。加 --commit 才写入台账）")
         return
 
-    wb = load_workbook(LEDGER)
-    ws = wb[SHEET]
-    r = ws.max_row + 1
+    target = Path(args.out) if args.out else LEDGER
     vals = {2: scene, 3: keyword + ("服务合同" if scene == "服务" else "采购合同"),
             4: rec["含税总价"], 5: rec["甲方"], 6: rec["乙方"], 7: keyword,
-            9: summary, 10: str(path), 11: "待确认"}
+            9: summary, 10: str(path.resolve()), 11: "待确认"}
+    wb = load_workbook(target)
+    ws = wb[SHEET]
+    absin = str(path.resolve())
+    r = None  # 幂等：同一路径已存在则更新该行，否则追加
+    for row in range(2, ws.max_row + 1):
+        if str(ws.cell(row=row, column=10).value or "").strip() == absin:
+            r = row
+            break
+    appended = r is None
+    if appended:
+        r = ws.max_row + 1
     for c, v in vals.items():
         if v:
             ws.cell(row=r, column=c, value=v)
-    wb.save(LEDGER)
-    print(f"[ok] 已新增台账第{r}行（状态=待确认，请核对后跑 fill_contract）")
+    wb.save(target)
+    act = "新增" if appended else "更新"
+    print(f"[ok] {act}台账第{r}行（状态=待确认，核对后跑 fill_contract）→ {target.name}")
 
 
 if __name__ == "__main__":
