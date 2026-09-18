@@ -117,19 +117,20 @@ def parse(text: str, items: list = None) -> dict:
     nl = [l for l in (x.strip() for x in text.splitlines()) if l]
     rec = {"甲方": "", "乙方": "", "含税总价": "", "明细": items or [], "付款": ""}
 
-    # 甲乙方：找含“（买方/卖方）”的行，取其后候选，只认“像公司名”的，
-    # 挡掉日期/省市地点（docx 表格拼接常把甲方：后面的日期误当名称）
+    # 甲乙方：找含“（买方/卖方）”的行，取其后候选，只认“像公司名”的。
+    # 只拒带【】占位符或日期的（如“【荆州】市【荆州】区”“2026年05月”）；
+    # 含“市/区/县”的真实公司名(如“沙市区凯胜…经营部”)要放行,故不按地点字误杀。
     def _is_org(s):
         s = s.strip()
         if not (2 <= len(s) <= 30) or "：" in s or ":" in s:
             return False
-        if re.search(r"[【】\d年月日省市县路号]", s):
-            # 地点/日期特征；公司名极少含【】或裸“省/市/路”
-            if not any(k in s for k in ("公司", "有限")):
-                return False
+        if "【" in s or "】" in s:
+            return False
+        if re.search(r"\d+\s*[年月日]", s) or re.search(r"[年月日]\s*\d", s):
+            return False
         return any(k in s for k in
                    ("公司", "有限", "厂", "中心", "经营部", "商行", "门市",
-                    "合作社", "集团", "商店", "站", "所", "部"))
+                    "合作社", "集团", "商店", "站", "所", "部", "队", "行"))
 
     def party(keys):
         for i, l in enumerate(nl):
@@ -143,15 +144,15 @@ def parse(text: str, items: list = None) -> dict:
     rec["甲方"] = party(["甲方（买方", "甲方(买方", "甲方（购买", "甲方：", "甲方:"])
     rec["乙方"] = party(["乙方（卖方", "乙方(卖方", "乙方（供货", "乙方：", "乙方:"])
 
+    flat = re.sub(r"\s+", "", text)   # 去空白版:应对“含税总价\n为：【…】”被换行拆开
     # 含税总价：锚定“含税总价为”，跳过正文“合同含税总价已经涵盖…”模板句；
     # “不含税总价”是超串，用 (?<!不) 挡掉
-    m = re.search(r"(?<!不)含税总价为[^\d]{0,4}([\d][\d,]*\.?\d*)", text)
+    m = re.search(r"(?<!不)含税总价为[^\d]{0,4}([\d][\d,]*\.?\d*)", flat)
     if m:
         v = float(_num(m.group(1)))
         rec["含税总价"] = f"{v:.2f}"  # 总价一律保留两位，匹配“共计：8390.00”
 
     # 付款方式：从“货款支付”起到第一个句号
-    flat = re.sub(r"\s+", "", text)
     m = re.search(r"(货款支付[：:].*?。|付款方式[：:].*?。|支付方[。]?)", flat)
     if m:
         rec["付款"] = m.group(1)
