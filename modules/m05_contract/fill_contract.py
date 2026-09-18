@@ -181,33 +181,54 @@ def resolve_attachments(kw, root=None, contract_path=None):
     return got
 
 
-def upload_attachment(page, got, rec, step):
-    """固定 3 行上传到“过程文件上传”明细表：
-    行1 事项审批 / 行2 比质比价报告单+供应商报价单及资质 / 行3 采购合同。
-    每行:加行->直接 set_input_files 到行内 file input(绕开 Flash 按钮)->轮询 docid 稳定->填文档名称。"""
-    frame = find_annex_frame(page)
-    if frame is None:
-        step("附件-定位帧", False, "无附件帧")
-        return False
-    btn_id = frame.evaluate(_JS_ADDBTN)
-    if not btn_id:
-        step("附件-无文档上传表", False)
-        return False
+def _set_docname(frame, idx, name):
+    """填文档名称：优先 Playwright fill(派发真实事件,OA才认)，JS 写值兜底。"""
+    try:
+        loc = frame.locator(f"input[name='field54275_{idx}']")
+        if loc.count():
+            loc.first.fill(name)
+            return 1
+    except Exception:
+        pass
+    js = ("(function(){var e=document.querySelector(\"input[name='field54275_%d']\");"
+          "if(!e)return 0;e.value=%s;"
+          "e.dispatchEvent(new Event('input',{bubbles:true}));"
+          "e.dispatchEvent(new Event('change',{bubbles:true}));return 1;})()") % (idx, json.dumps(name))
+    try:
+        return frame.evaluate(js)
+    except Exception:
+        return 0
+
+
+def _attach_rows(rec):
     kw = rec.get("关联关键词") or rec.get("合同名称") or ""
     kind = "服务合同" if "服务" in (rec.get("场景") or "") else "采购合同"
-    rows = [
+    return [
         (["事项审批"], "事项审批"),
         (["比质比价报告单", "供应商报价单及资质"], "比质比价报告单、供应商报价单及资质"),
         (["采购合同"], rec.get("合同名称") or f"{kw}{kind}"),
     ]
-    # 阶段1：逐行加行 + 塞文件 + 推队列(不在此死等,并发上传交给阶段2统一收口)
+
+
+def upload_begin(page, got, rec, step):
+    """起传：加 3 行 + 塞文件 + 推队列，快速返回(不在此等上传完成)。
+    返回 state 供 upload_finish 收口；失败返回 None。"""
+    frame = find_annex_frame(page)
+    if frame is None:
+        step("附件-定位帧", False, "无附件帧")
+        return None
+    btn_id = frame.evaluate(_JS_ADDBTN)
+    if not btn_id:
+        step("附件-无文档上传表", False)
+        return None
+    rows = _attach_rows(rec)
     added = []
     for idx, (files, dname) in enumerate(rows):
         try:
             frame.locator("button[id='%s']" % btn_id).first.click(force=True, timeout=4000)
         except Exception as e:
             step(f"附件-行{idx+1}加行", False, str(e)[:60]); continue
-        time.sleep(1.5)
+        time.sleep(1.2)
         frame.evaluate(_mark_idx_js(idx))
         fi = frame.locator("input[type=file][data-upl='1']")
         if fi.count() == 0:
@@ -219,10 +240,17 @@ def upload_attachment(page, got, rec, step):
             added.append(idx)
         except Exception as e:
             step(f"附件-行{idx+1}塞文件", False, str(e)[:70])
-    # 阶段2：统一收口轮询,直到所有已加行 docid 落定且无 Uploading/Pending
+    step("附件-起传", bool(added), f"已塞{len(added)}行,后台上传中")
+    return {"frame": frame, "rows": rows, "added": added, "got": got}
+
+
+def upload_finish(state, rec, step):
+    """收口：等所有已加行 docid 落定且无 Uploading/Pending，再按 name 填文档名称，据实报告。"""
+    if not state:
+        return False
+    frame, rows, added, got = state["frame"], state["rows"], state["added"], state["got"]
     docids = {}
     for _ in range(90):
-        time.sleep(1)
         frame.evaluate(_JS_STARTQ)          # 持续推队列,确保多文件/并发都带上
         allok = bool(added)
         for idx in added:
@@ -236,18 +264,10 @@ def upload_attachment(page, got, rec, step):
                 allok = False
         if allok:
             break
-    # 阶段3：填各行文档名称
+        time.sleep(1)
     for idx, (files, dname) in enumerate(rows):
-        if idx not in added:
-            continue
-        frame.evaluate(_mark_idx_js(idx))
-        try:
-            ti = frame.locator("input[type=text][data-dname='1']")
-            if ti.count() and not ti.last.input_value():
-                ti.last.fill(dname)
-        except Exception:
-            pass
-    # 阶段4：据实逐行报告
+        if idx in added:
+            _set_docname(frame, idx, dname)
     allok = True
     for idx, (files, dname) in enumerate(rows):
         d = docids.get(idx, "")
@@ -624,17 +644,24 @@ def main():
                 step("定位表单帧", False)
                 raise RuntimeError("无表单帧")
             step("定位表单帧", True, frame.url[:60])
+            # 先起传附件(后台上传),再填表单——上传耗时与填表时间重叠
+            up_state = None
+            if attach and attach_files:
+                try:
+                    up_state = upload_begin(page, attach_files, rec, step)
+                except Exception as e:
+                    step("附件-起传", False, str(e)[:100])
             for kind, fid, val in build_steps(rec, br):
                 apply_step(page, frame, kind, fid, val, step)
             time.sleep(2)
             page.screenshot(path=str(paths.STATE / "contract_filled.png"),
                             full_page=True)
             step("整页截图", True)
-            if attach and attach_files:
+            if attach and up_state:
                 try:
-                    upload_attachment(page, attach_files, rec, step)
+                    upload_finish(up_state, rec, step)
                 except Exception as e:
-                    step("附件上传", False, str(e)[:100])
+                    step("附件-收口", False, str(e)[:100])
             (paths.STATE / "contract_report.json").write_text(
                 json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
             if args.save:
@@ -678,7 +705,9 @@ def main():
                             "if(!t)return 'no table';"
                             "var ids=[];t.querySelectorAll('input[type=hidden]').forEach(function(e){"
                             "if(/^field\\d+_\\d+$/.test(e.name)&&/^\\d/.test(e.value||''))ids.push(e.name+'='+e.value);});"
-                            "return t.textContent.replace(/\\s+/g,' ').slice(0,160)+' || docids:'+ids.join(',');})()")
+                            "var nm=[];t.querySelectorAll('input[type=text]').forEach(function(e){"
+                            "if(/^field\\d+_\\d+$/.test(e.name))nm.push(e.name+'=\"'+(e.value||'')+'\"');});"
+                            "return 'names:'+nm.join(',')+' || docids:'+ids.join(',');})()")
                         step("存后回读-附件", "docids:" in tbl and "=" in tbl.split("docids:")[-1], tbl)
                     except Exception as e:
                         step("存后回读-附件", False, str(e)[:80])
