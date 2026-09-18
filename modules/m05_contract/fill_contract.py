@@ -10,6 +10,7 @@ import argparse
 import datetime
 import json
 import re
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -96,6 +97,79 @@ def find_form_frame(page):
             return best[1]
         time.sleep(2)
     return None
+
+
+def find_annex_frame(page):
+    """附件控件在独立嵌套帧(含 #field-annexupload)，非表单主帧。"""
+    for _ in range(10):
+        for f in page.frames:
+            try:
+                if f.query_selector("#field-annexupload"):
+                    return f
+            except Exception:
+                pass
+        time.sleep(2)
+    return None
+
+
+# 认出“请求附件”上传器：SWFUpload 实例 upload_url 含 MultiDocUploadByWorkflow & docfiletype=1
+_JS_ANNEX_IDX = (
+    "(function(){var want=-1;"
+    "if(window.SWFUpload&&SWFUpload.instances){for(var k in SWFUpload.instances){"
+    "var u=(SWFUpload.instances[k].settings||{}).upload_url||'';"
+    "if(u.indexOf('MultiDocUploadByWorkflow')>=0&&u.indexOf('docfiletype=1')>=0){"
+    "var n=parseInt(k.replace(/[^0-9]/g,''),10);if(!isNaN(n))want=n;}}}return want;})()")
+
+
+def _norm_attach_name(src, rec):
+    """附件按口径规范命名：采购合同（事项）.pdf / 服务合同（事项）.pdf。"""
+    kw = rec.get("关联关键词") or rec.get("合同名称") or "合同"
+    kind = "服务合同" if "服务" in (rec.get("场景") or "") else "采购合同"
+    target = paths.STATE / f"{kind}（{kw}）.pdf"
+    try:
+        shutil.copy2(src, target)
+        return target
+    except Exception:
+        return src
+
+
+def upload_attachment(page, src, rec, step):
+    """把合同 PDF 作为请求附件上传(泛微 SWFUpload docfiletype=1 通道)。返回 docid。"""
+    frame = find_annex_frame(page)
+    if frame is None:
+        step("附件-定位帧", False, "无 #field-annexupload 帧")
+        return ""
+    try:
+        frame.locator("text=过程文件上传").first.click(timeout=3000)
+    except Exception:
+        pass
+    time.sleep(1)
+    idx = frame.evaluate(_JS_ANNEX_IDX)
+    fis = frame.locator("input[type=file]")
+    n = fis.count()
+    if idx is None or idx < 0 or idx >= n:
+        idx = n - 1 if n else -1          # 兜底取最后一个
+    if idx < 0:
+        step("附件-无上传input", False)
+        return ""
+    att = _norm_attach_name(Path(src), rec)
+    try:
+        fis.nth(idx).set_input_files(str(att), timeout=8000)
+    except Exception as e:
+        step("附件-set_files", False, str(e)[:80])
+        return ""
+    docid = ""
+    for _ in range(30):
+        time.sleep(1)
+        try:
+            v = frame.locator("#field-annexupload").first.input_value()
+        except Exception:
+            v = ""
+        if v:
+            docid = v
+            break
+    step("附件上传", bool(docid), f"idx={idx} name={att.name} docid={docid}")
+    return docid
 
 
 def sel(frame, fid, label):
@@ -423,8 +497,11 @@ def main():
     ap.add_argument("--save", action="store_true")
     ap.add_argument("--no-browser", action="store_true",
                     help="跳过放大镜字段(留人工);默认自动填")
+    ap.add_argument("--no-attach", action="store_true",
+                    help="跳过附件上传;默认按台账J列合同路径上传")
     args = ap.parse_args()
     BROWSER = not args.no_browser
+    attach = not args.no_attach
     rec = read_row(args.row)
     br = read_branch(rec["场景"])
     report = {"row": args.row, "rec": rec, "branch": br, "steps": []}
@@ -458,6 +535,15 @@ def main():
             page.screenshot(path=str(paths.STATE / "contract_filled.png"),
                             full_page=True)
             step("整页截图", True)
+            if attach:
+                src = rec.get("合同路径") or ""
+                if src and Path(src).exists():
+                    try:
+                        upload_attachment(page, src, rec, step)
+                    except Exception as e:
+                        step("附件上传", False, str(e)[:100])
+                else:
+                    step("附件上传", False, f"合同路径缺失/不存在: {src!r}")
             (paths.STATE / "contract_report.json").write_text(
                 json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
             if args.save:
