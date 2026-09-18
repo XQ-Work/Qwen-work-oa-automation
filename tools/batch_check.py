@@ -48,6 +48,6 @@ for proj in PROJECTS:
     try:
         got = fc.resolve_attachments(kw, contract_path=str(p))
         for k, v in got.items():
-            print(f"    [有] {k} -> {v.name}")
+            print(f"    [有] {k} -> " + " + ".join(x.name for x in v))
     except FileNotFoundError as e:
         print("    [缺件]", e)

@@ -160,25 +160,32 @@ REQUIRED_DOCS = ["事项审批", "比质比价报告单", "供应商报价单及
 
 
 def resolve_attachments(kw, root=None, contract_path=None):
-    """按 材料名（kw）.pdf 在 root 递归找 4 必传件；缺任一则抛 FileNotFoundError。
-    采购合同优先用台账 J 列路径。排除 已用印/盖章/扫描 版。"""
-    root = Path(root or ATTACH_ROOT)
+    """每个材料可多份文件：在项目文件夹内找所有 `材料名（kw)*.pdf`（前缀匹配，
+    如两份事项审批 事项审批（发电机排涝）.pdf + 事项审批（发电机排涝）排涝物资.pdf 都收）。
+    采购合同优先用台账 J 列路径。缺任一材料则抛 FileNotFoundError。返回 {材料:[Path,…]}。"""
+    # 搜索范围优先合同所在项目文件夹(2026-NNN-*)，避免跨项目误命中
+    scope = None
+    if contract_path:
+        cp = Path(contract_path).resolve()
+        for anc in [cp.parent, *cp.parents]:
+            if re.search(r"\d{4}-\d{3}-", anc.name):
+                scope = anc
+                break
+    scope = Path(scope or root or ATTACH_ROOT)
     got, missing = {}, []
     for base in REQUIRED_DOCS:
-        f = None
+        files = []
         if base == "采购合同" and contract_path and Path(contract_path).exists():
-            f = Path(contract_path)
+            files = [Path(contract_path)]
         else:
-            want = f"{base}（{kw}）.pdf"
-            for cand in sorted(root.rglob(want)):
+            for cand in sorted(scope.rglob(f"{base}（{kw}*.pdf")):
                 if any(s in cand.name for s in ("已用印", "盖章", "扫描")):
                     continue
-                f = cand
-                break
-        if f is None:
+                files.append(cand)
+        if not files:
             missing.append(f"{base}（{kw}）.pdf")
         else:
-            got[base] = f
+            got[base] = files
     if missing:
         raise FileNotFoundError("缺少文件：" + "、".join(missing))
     return got
@@ -236,7 +243,7 @@ def upload_begin(page, got, rec, step):
         fi = frame.locator("input[type=file][data-upl='1']")
         if fi.count() == 0:
             step(f"附件-行{idx+1}", False, "无file input"); continue
-        plist = [str(got[b]) for b in files]
+        plist = [str(f) for b in files for f in got[b]]   # 每个材料可多份文件
         try:
             fi.last.set_input_files(plist, timeout=8000)
             frame.evaluate(_JS_STARTQ)
@@ -276,7 +283,7 @@ def upload_finish(state, rec, step):
         d = docids.get(idx, "")
         ok = bool(d and d != "NULL")
         step(f"附件-行{idx+1}[{dname}]", ok,
-             " + ".join(got[b].name for b in files) + f" docid={d}")
+             " + ".join(f.name for b in files for f in got[b]) + f" docid={d}")
         allok = allok and ok
     return allok
 
@@ -621,8 +628,8 @@ def main():
         try:
             attach_files = resolve_attachments(
                 rec.get("关联关键词") or "", contract_path=rec.get("合同路径"))
-            print("[附件] 4件齐：" + " | ".join(
-                f"{k}={v.name}" for k, v in attach_files.items()), flush=True)
+            print("[附件] 齐：" + " | ".join(
+                f"{k}×{len(v)}" for k, v in attach_files.items()), flush=True)
         except FileNotFoundError as e:
             raise SystemExit(f"[附件] {e} —— 已中止(不填表/不上传/不保存)")
     report = {"row": args.row, "rec": rec, "branch": br, "steps": []}
