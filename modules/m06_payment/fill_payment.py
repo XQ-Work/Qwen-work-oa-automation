@@ -140,6 +140,41 @@ def fill_payinfo(frame, idx, desc, amount, count, files, step):
     return True
 
 
+# 电子发票信息明细表(detail4)列→字段
+EI = {"发票号码": "field43293", "发票号码对比": "field43297",
+      "开票日期": "field43294", "发票金额": "field43295"}
+EI_ADDBTN = "$addbutton4$"
+
+
+def fill_einvoice(frame, idx, inv_no, inv_date, inv_amount, step):
+    """加一行“电子发票信息”，只填 发票号码/发票号码对比(=同号防错)/开票日期/发票金额。"""
+    try:
+        frame.locator("button[id='%s']" % EI_ADDBTN).first.click(force=True, timeout=4000)
+    except Exception as e:
+        step("电子发票-加行", False, str(e)[:60]); return False
+    time.sleep(1.5)
+    for name, v in [(EI["发票号码"], inv_no), (EI["发票号码对比"], inv_no),
+                    (EI["发票金额"], inv_amount)]:
+        if not v:
+            continue
+        try:
+            frame.locator("input[name=%s_%d]" % (name, idx)).first.fill(str(v))
+        except Exception as e:
+            step(f"电子发票-{name}", False, str(e)[:60])
+    if inv_date:   # 开票日期是只读日期控件,JS 写值+派发 change
+        js = ("(function(){var e=document.querySelector(\"input[name='field43294_%d']\");"
+              "if(!e)return 0;e.value=%s;"
+              "e.dispatchEvent(new Event('input',{bubbles:true}));"
+              "e.dispatchEvent(new Event('change',{bubbles:true}));return 1;})()") % (idx, json.dumps(str(inv_date)))
+        try:
+            frame.evaluate(js)
+        except Exception as e:
+            step("电子发票-开票日期", False, str(e)[:60])
+    step("电子发票行%d" % (idx + 1), True,
+         "号码=%s 日期=%s 金额=%s" % (inv_no, inv_date, inv_amount))
+    return True
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--payer", default="荆州浦华荆清水务有限公司")
@@ -148,6 +183,9 @@ def main():
     ap.add_argument("--item-type", default="货物类采购事项")
     ap.add_argument("--contract-name", default="", help="费用说明用:合同名称")
     ap.add_argument("--invoices", type=int, default=1, help="发票张数")
+    ap.add_argument("--inv-no", default="", help="发票号码")
+    ap.add_argument("--inv-date", default="", help="开票日期 YYYY-MM-DD")
+    ap.add_argument("--inv-amount", default="", help="发票金额(价税合计)")
     ap.add_argument("--attach", nargs="*", default=[], help="付款信息附件路径")
     ap.add_argument("--save", action="store_true")
     args = ap.parse_args()
@@ -227,6 +265,9 @@ def main():
             desc = f"{cn}，已完成入库验收，按照合同约定付款{args.amount}元"
             atts = [Path(a) for a in args.attach if Path(a).exists()]
             fill_payinfo(frame, 0, desc, args.amount, args.invoices, atts, step)
+            if args.inv_no or args.inv_date or args.inv_amount:
+                fill_einvoice(frame, 0, args.inv_no, args.inv_date,
+                              args.inv_amount or args.amount, step)
 
             time.sleep(2)
             page.screenshot(path=str(paths.STATE / "payment_filled.png"), full_page=True)
