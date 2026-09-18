@@ -10,6 +10,7 @@
 """
 import argparse
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -35,6 +36,35 @@ F = {
     "付款单位名称": "field249130",
     "收款单位信息": "field43298",
 }
+
+LEDGER = paths.DATA / "付款发起台账.xlsx"
+LSHEET = "付款台账"
+L = {2: "合同名称", 3: "付款单位", 4: "收款单位", 5: "付款金额",
+     6: "采购类事项类型", 7: "发票号码", 8: "开票日期", 9: "费用说明",
+     10: "发票路径", 11: "状态", 12: "OA流程编号", 13: "发起时间"}
+
+
+def read_ledger(r):
+    from openpyxl import load_workbook
+    wb = load_workbook(LEDGER, data_only=True)
+    ws = wb[LSHEET]
+    rec = {k: ("" if ws.cell(row=r, column=c).value is None
+               else str(ws.cell(row=r, column=c).value).strip())
+           for c, k in L.items()}
+    wb.close()
+    return rec
+
+
+def write_ledger(r, reqid):
+    import datetime
+    from openpyxl import load_workbook
+    wb = load_workbook(LEDGER)
+    ws = wb[LSHEET]
+    ws.cell(r, 11, "已存草稿")
+    if reqid:
+        ws.cell(r, 12, reqid)
+    ws.cell(r, 13, datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
+    wb.save(LEDGER)
 
 
 def set_money(frame, fid, val):
@@ -154,22 +184,18 @@ def fill_einvoice(frame, idx, inv_no, inv_date, inv_amount, step):
         step("电子发票-加行", False, str(e)[:60]); return False
     time.sleep(1.5)
     for name, v in [(EI["发票号码"], inv_no), (EI["发票号码对比"], inv_no),
-                    (EI["发票金额"], inv_amount)]:
+                    (EI["开票日期"], inv_date), (EI["发票金额"], inv_amount)]:
         if not v:
             continue
-        try:
-            frame.locator("input[name=%s_%d]" % (name, idx)).first.fill(str(v))
-        except Exception as e:
-            step(f"电子发票-{name}", False, str(e)[:60])
-    if inv_date:   # 开票日期是只读日期控件,JS 写值+派发 change
-        js = ("(function(){var e=document.querySelector(\"input[name='field43294_%d']\");"
+        js = ("(function(){var e=document.querySelector(\"input[name='%s_%d']\");"
               "if(!e)return 0;e.value=%s;"
               "e.dispatchEvent(new Event('input',{bubbles:true}));"
-              "e.dispatchEvent(new Event('change',{bubbles:true}));return 1;})()") % (idx, json.dumps(str(inv_date)))
+              "e.dispatchEvent(new Event('change',{bubbles:true}));return 1;})()"
+              ) % (name, idx, json.dumps(str(v)))
         try:
             frame.evaluate(js)
         except Exception as e:
-            step("电子发票-开票日期", False, str(e)[:60])
+            step(f"电子发票-{name}", False, str(e)[:60])
     step("电子发票行%d" % (idx + 1), True,
          "号码=%s 日期=%s 金额=%s" % (inv_no, inv_date, inv_amount))
     return True
@@ -178,8 +204,8 @@ def fill_einvoice(frame, idx, inv_no, inv_date, inv_amount, step):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--payer", default="荆州浦华荆清水务有限公司")
-    ap.add_argument("--payee", required=True)
-    ap.add_argument("--amount", required=True)
+    ap.add_argument("--payee", default="", help="收款单位(供应商)")
+    ap.add_argument("--amount", default="", help="付款金额")
     ap.add_argument("--item-type", default="货物类采购事项")
     ap.add_argument("--contract-name", default="", help="费用说明用:合同名称")
     ap.add_argument("--invoices", type=int, default=1, help="发票张数")
@@ -187,8 +213,32 @@ def main():
     ap.add_argument("--inv-date", default="", help="开票日期 YYYY-MM-DD")
     ap.add_argument("--inv-amount", default="", help="发票金额(价税合计)")
     ap.add_argument("--attach", nargs="*", default=[], help="付款信息附件路径")
+    ap.add_argument("--invoice", default="", help="电子发票PDF,自动解析收款/金额/发票号/日期")
+    ap.add_argument("--row", type=int, default=0, help="从付款台账读取第N行")
     ap.add_argument("--save", action="store_true")
     args = ap.parse_args()
+
+    # 台账行优先，其次发票解析，最后命令行参数
+    if args.row:
+        rec = read_ledger(args.row)
+        args.payer = rec.get("付款单位") or args.payer
+        args.payee = rec.get("收款单位") or args.payee
+        args.amount = rec.get("付款金额") or args.amount
+        args.item_type = rec.get("采购类事项类型") or args.item_type
+        args.contract_name = rec.get("合同名称") or args.contract_name
+        args.inv_no = rec.get("发票号码") or args.inv_no
+        args.inv_date = rec.get("开票日期") or args.inv_date
+        args.inv_amount = rec.get("付款金额") or args.inv_amount
+    if args.invoice:
+        import parse_invoice as pi
+        inv = pi.parse(Path(args.invoice))
+        args.payee = args.payee or inv["销售方"]
+        args.amount = args.amount or inv["价税合计"]
+        args.inv_no = args.inv_no or inv["发票号码"]
+        args.inv_date = args.inv_date or inv["开票日期"]
+        args.inv_amount = args.inv_amount or inv["价税合计"]
+    if not args.payee or not args.amount:
+        raise SystemExit("缺少收款单位或付款金额（用 --row 读台账 / --invoice 解析 / 或显式传 --payee --amount）")
 
     def step(name, ok, err=""):
         print(f"[{'ok ' if ok else 'ERR'}] {name} {err}", flush=True)
@@ -276,19 +326,32 @@ def main():
                 del signals[:]
                 page.locator("input.e8_btn_top[value=保存]").first.click(timeout=8000)
                 reqid, ok = "", False
-                for i in range(60):
+                for i in range(150):          # 最多轮询 ~300s，扫顶层页+所有帧
                     time.sleep(2)
-                    if any("正在保存" in s or "保存中" in s for s in signals):
-                        continue
-                    mm = __import__("re").search(r"requestid=(\d+)", page.url or "", __import__("re").I)
+                    urls = [page.url or ""] + [f.url or "" for f in page.frames]
+                    mm = None
+                    for u in urls:
+                        mm = re.search(r"requestid=(\d+)", u, re.I)
+                        if mm:
+                            break
                     if mm:
-                        reqid, ok = mm.group(1), True; break
+                        reqid, ok = mm.group(1), True
+                        break
                     if any("成功" in s for s in signals):
-                        ok = True; break
-                    if i > 3 and "AddRequest" not in (page.url or ""):
-                        ok = True; break
+                        ok = True
+                        break
                 page.screenshot(path=str(paths.STATE / "payment_saved.png"), full_page=True)
-                step("保存草稿", ok, f"requestid={reqid} 弹窗={signals[:3]}")
+                print("[postsave-url] " + (page.url or ""), flush=True)
+                if not reqid:   # 导航可能刚在轮询结束后完成，兜底再读一次
+                    for u in [page.url or ""] + [f.url or "" for f in page.frames]:
+                        mm = re.search(r"requestid=(\d+)", u, re.I)
+                        if mm:
+                            reqid, ok = mm.group(1), True
+                            break
+                step("保存草稿", ok, f"requestid={reqid}")
+                if ok and args.row:
+                    write_ledger(args.row, reqid)
+                    step("台账回写", True, f"row{args.row} 已存草稿 {reqid}")
         finally:
             time.sleep(1)
             try:
