@@ -28,6 +28,8 @@ SHEET = "合同台账"
 COL = {2: "场景", 3: "合同名称", 4: "金额", 5: "甲方", 6: "乙方",
        7: "关联关键词", 8: "拟签日期", 9: "摘要覆盖", 10: "合同路径", 11: "状态"}
 
+OUR_COMPANY = "荆州浦华荆清水务有限公司"   # 合同会签甲方恒为本公司
+
 
 def read_text(path: Path) -> str:
     """合同全文（用于甲乙方/总价/付款条款的正则抽取）。"""
@@ -142,7 +144,21 @@ def parse(text: str, items: list = None) -> dict:
                         return c
         return ""
     rec["甲方"] = party(["甲方（买方", "甲方(买方", "甲方（购买", "甲方：", "甲方:"])
+    if not rec["甲方"]:
+        rec["甲方"] = OUR_COMPANY          # 合同会签甲方恒为本公司
     rec["乙方"] = party(["乙方（卖方", "乙方(卖方", "乙方（供货", "乙方：", "乙方:"])
+    # 乙方兜底：服务/施工合同常无“乙方（卖方）”行，读末页签署区公司信息。
+    # 只认“以公司后缀结尾”的短串，避免把“…进行操作…故障。”这类整句误判。
+    if not rec["乙方"]:
+        _SUF = ("公司", "有限", "经营部", "商行", "门市", "合作社", "集团",
+                "商店", "厂", "中心", "站", "所")
+        for l in nl[int(len(nl) * 0.55):]:
+            seg = l.split("：")[-1].split(":")[-1].strip() if ("：" in l or ":" in l) else l
+            seg = seg.strip(" 　.。、,，;；")
+            if (2 <= len(seg) <= 24 and seg.endswith(_SUF)
+                    and seg != rec["甲方"] and not any(x in seg for x in ("甲方", "乙方"))):
+                rec["乙方"] = seg
+                break
 
     flat = re.sub(r"\s+", "", text)   # 去空白版:应对“含税总价\n为：【…】”被换行拆开
     # 含税总价：锚定“含税总价为”，跳过正文“合同含税总价已经涵盖…”模板句；
@@ -151,9 +167,17 @@ def parse(text: str, items: list = None) -> dict:
     if m:
         v = float(_num(m.group(1)))
         rec["含税总价"] = f"{v:.2f}"  # 总价一律保留两位，匹配“共计：8390.00”
+    else:
+        # 服务/施工合同锚点：“本合同总金额为人民币【X】元”
+        m = re.search(r"(?:本合同|合同)总金额为?人民币[^\d]{0,4}([\d][\d,]*\.?\d*)", flat)
+        if not m:
+            # 施工包干价：“共计【X】元”“合同价款即【X】元”
+            m = re.search(r"(?:共计|合同价款即|包干价[^\d]{0,6})[【\[]?([\d][\d,]*\.\d{2})[】\]]?元", flat)
+        if m:
+            rec["含税总价"] = f"{float(_num(m.group(1))):.2f}"
 
-    # 付款方式：从“货款支付”起到第一个句号
-    m = re.search(r"(货款支付[：:].*?。|付款方式[：:].*?。|支付方[。]?)", flat)
+    # 付款方式：从“货款支付/付款方式”起，到句号或“第X章”为止(防止串到后续条款)
+    m = re.search(r"(货款支付[：:].*?|付款方式[：:].*?)(?:。|第[一二三四五六七八九十]+章)", flat)
     if m:
         rec["付款"] = m.group(1)
     return rec
@@ -183,8 +207,10 @@ def build_summary(rec: dict, scene: str, keyword: str) -> str:
 
 
 def detect_scene(text: str, stem: str = "") -> str:
-    if "服务合同" in text[:400] or "服务合同" in stem:
-        return "服务"
+    head = text[:400]
+    for kw in ("服务合同", "服务协议", "施工合同"):
+        if kw in head or kw in stem:
+            return "服务"
     return "货物"
 
 
@@ -199,6 +225,20 @@ def keyword_from_name(stem: str) -> str:
     for s in _STATUS:
         raw = raw.replace(s, "")
     return raw.strip()
+
+
+def keyword_from_path(path) -> str:
+    """事项优先取项目文件夹名：形如 …/2026-008-维修用品采购/… → 维修用品
+    （去掉尾部“采购/服务”，但保留“维修”等实义词）。取不到再退回文件名括号。"""
+    m = re.search(r"[\\/]\d{4}-\d{3}-([^\\/]+)[\\/]", str(path))
+    if m:
+        s = m.group(1).strip()
+        for suf in ("采购合同", "采购", "服务合同", "服务"):
+            if s.endswith(suf) and len(s) > len(suf) + 1:
+                s = s[:-len(suf)]
+                break
+        return s.strip()
+    return keyword_from_name(Path(path).stem)
 
 
 def main():
@@ -216,7 +256,7 @@ def main():
     items = read_items(path)
     rec = parse(text, items)
     scene = detect_scene(text, path.stem)
-    keyword = keyword_from_name(path.stem) or \
+    keyword = keyword_from_path(path) or \
         (rec["明细"][0]["名称"] if rec["明细"] else "")
     summary = build_summary(rec, scene, keyword)
 
