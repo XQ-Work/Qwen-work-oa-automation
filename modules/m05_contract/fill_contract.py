@@ -644,19 +644,19 @@ def main():
                 step("定位表单帧", False)
                 raise RuntimeError("无表单帧")
             step("定位表单帧", True, frame.url[:60])
-            # 先起传附件(后台上传),再填表单——上传耗时与填表时间重叠
-            up_state = None
-            if attach and attach_files:
-                try:
-                    up_state = upload_begin(page, attach_files, rec, step)
-                except Exception as e:
-                    step("附件-起传", False, str(e)[:100])
+            # 先填完表单(含易受并发上传抢占而超时的级联下拉),再起传附件
             for kind, fid, val in build_steps(rec, br):
                 apply_step(page, frame, kind, fid, val, step)
             time.sleep(2)
             page.screenshot(path=str(paths.STATE / "contract_filled.png"),
                             full_page=True)
             step("整页截图", True)
+            up_state = None
+            if attach and attach_files:
+                try:
+                    up_state = upload_begin(page, attach_files, rec, step)
+                except Exception as e:
+                    step("附件-起传", False, str(e)[:100])
             if attach and up_state:
                 try:
                     upload_finish(up_state, rec, step)
