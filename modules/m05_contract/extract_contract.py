@@ -197,9 +197,11 @@ def build_summary(rec: dict, scene: str, keyword: str) -> str:
 
     if len(items) == 1:
         p1 = f"1.此次采购{_seg(items[0])} 共计：{total}元。"
-    elif len(items) > 1:
+    elif 2 <= len(items) <= 3:
         seg = "、".join(_seg(x) for x in items)
         p1 = f"1.此次采购{seg}，共计：{total}元。"
+    elif len(items) > 3:
+        p1 = f"1.此次采购共计{total}元，详细清单见明细"
     else:
         p1 = f"1.共计：{total}元。"
     p2 = "2." + (rec["付款"] or "货款支付按合同约定执行。")
