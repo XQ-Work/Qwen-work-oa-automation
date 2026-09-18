@@ -77,12 +77,78 @@ def trim_payer_bank(frame, keep_no=2):
         return -1
 
 
+# 付款信息明细表(detail0)列→字段(后缀=行号)
+PI = {"费用说明": "field43271", "发票张数": "field42925",
+      "费用金额": "field42926", "附件": "field43272"}
+PI_ADDBTN = "$addbutton0$"   # 付款信息加行按钮
+
+
+def _pi_mark_js(idx):
+    return ("(function(){var o=document.querySelectorAll('input[data-upl]');"
+            "for(var x=0;x<o.length;x++)o[x].removeAttribute('data-upl');"
+            "var h=document.querySelector(\"input[name='field43272_%d']\");if(!h)return 0;"
+            "var tr=h.closest('tr');if(!tr)return 0;var fi=tr.querySelectorAll('input[type=file]');"
+            "for(var j=0;j<fi.length;j++)fi[j].setAttribute('data-upl','1');return fi.length;})()") % idx
+
+
+def _pi_state_js(idx):
+    return ("(function(){var h=document.querySelector(\"input[name='field43272_%d']\");"
+            "var tr=h?h.closest('tr'):null;var t=tr?tr.textContent.replace(/\\s+/g,' '):'';"
+            "var busy=(t.indexOf('Uploading')>=0||t.indexOf('Pending')>=0)?1:0;"
+            "return (h?(h.value||''):'')+'|'+busy;})()") % idx
+
+
+def fill_payinfo(frame, idx, desc, amount, count, files, step):
+    """加一行“付款信息”明细并填 费用说明/发票张数/费用金额，附件传到该行附件列。"""
+    try:
+        frame.locator("button[id='%s']" % PI_ADDBTN).first.click(force=True, timeout=4000)
+    except Exception as e:
+        step("付款信息-加行", False, str(e)[:60]); return False
+    time.sleep(1.5)
+    try:
+        frame.locator("textarea[name=%s_%d]" % (PI["费用说明"], idx)).first.fill(desc)
+    except Exception as e:
+        step("费用说明", False, str(e)[:60])
+    try:
+        frame.locator("input[name=%s_%d]" % (PI["发票张数"], idx)).first.fill(str(count))
+    except Exception as e:
+        step("发票张数", False, str(e)[:60])
+    try:
+        frame.locator("input[name=%s_%d]" % (PI["费用金额"], idx)).first.fill(str(amount))
+    except Exception as e:
+        step("费用金额", False, str(e)[:60])
+    docid = ""
+    if files:
+        frame.evaluate(_pi_mark_js(idx))
+        fi = frame.locator("input[type=file][data-upl='1']")
+        if fi.count():
+            try:
+                fi.last.set_input_files([str(f) for f in files], timeout=8000)
+                frame.evaluate(m05._JS_STARTQ)
+                for _ in range(45):
+                    time.sleep(1)
+                    frame.evaluate(m05._JS_STARTQ)
+                    raw = frame.evaluate(_pi_state_js(idx)) or "|"
+                    d, b = (raw.split("|") + ["0"])[:2]
+                    if d and d != "NULL" and b == "0":
+                        docid = d
+                        break
+            except Exception as e:
+                step("付款信息-附件", False, str(e)[:70])
+    step("付款信息行%d" % (idx + 1), True,
+         "金额=%s 张数=%s 附件docid=%s" % (amount, count, docid))
+    return True
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--payer", default="荆州浦华荆清水务有限公司")
     ap.add_argument("--payee", required=True)
     ap.add_argument("--amount", required=True)
     ap.add_argument("--item-type", default="货物类采购事项")
+    ap.add_argument("--contract-name", default="", help="费用说明用:合同名称")
+    ap.add_argument("--invoices", type=int, default=1, help="发票张数")
+    ap.add_argument("--attach", nargs="*", default=[], help="付款信息附件路径")
     ap.add_argument("--save", action="store_true")
     args = ap.parse_args()
 
@@ -94,6 +160,8 @@ def main():
             str(paths.PROFILE), channel="msedge", headless=False,
             args=["--start-maximized"], no_viewport=True)
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
+        signals = []
+        page.on("dialog", lambda d: (signals.append(d.message or ""), d.accept()))
         for pg in ctx.pages[1:]:
             try:
                 pg.close()
@@ -154,12 +222,17 @@ def main():
             else:
                 step("放大镜收款单位信息", False, args.payee)
 
+            # 付款信息明细行：费用说明/发票张数/费用金额 + 附件
+            cn = args.contract_name or ""
+            desc = f"{cn}，已完成入库验收，按照合同约定付款{args.amount}元"
+            atts = [Path(a) for a in args.attach if Path(a).exists()]
+            fill_payinfo(frame, 0, desc, args.amount, args.invoices, atts, step)
+
             time.sleep(2)
             page.screenshot(path=str(paths.STATE / "payment_filled.png"), full_page=True)
             step("整页截图", True)
             if args.save:
-                signals = []
-                page.on("dialog", lambda d: (signals.append(d.message or ""), d.accept()))
+                del signals[:]
                 page.locator("input.e8_btn_top[value=保存]").first.click(timeout=8000)
                 reqid, ok = "", False
                 for i in range(60):
