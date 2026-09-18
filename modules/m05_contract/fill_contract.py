@@ -57,6 +57,9 @@ FIXED_FIELD_IDS = {
     "field378630": "325",    # 合同关联分部甲
 }
 
+# 标题模板：流程名-公司简称-经办人-新合同名称（新合同名称运行时拼接）
+TITLE_PREFIX = "070302水务板块-非投资并购类合同会签-荆州荆清-肖桥-"
+
 
 def read_row(r):
     wb = load_workbook(LEDGER, data_only=True)
@@ -537,6 +540,9 @@ def build_steps(rec, br):
             steps.append(("browser", _fid, _nm))
     steps.append(("txt", F["文档名称"], _contract_name(rec)))
     steps.append(("sel", F["法人章"], "否"))
+    # 标题放最后设,避免被 OA 的 changeKeyword 依据字段变更重新生成覆盖
+    steps.append(("txt", "requestname",
+                  TITLE_PREFIX + _contract_name(rec)))
     return steps
 
 
@@ -571,7 +577,7 @@ def apply_step(page, frame, kind, fid, val, step):
             step(f"直填{fid}", cur == str(idv), f"id={cur!r} 期望{idv}")
         elif kind == "txt":
             txt(frame, fid, val)
-            step(f"{fid}", True, str(val)[:30])
+            step(f"{fid}", True, str(val)[:80])
         elif kind == "area":
             area(frame, fid, val)
             step(f"{fid}", True, str(val)[:30])
