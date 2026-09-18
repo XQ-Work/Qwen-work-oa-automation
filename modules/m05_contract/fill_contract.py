@@ -112,13 +112,26 @@ def find_annex_frame(page):
     return None
 
 
-# 认出“请求附件”上传器：SWFUpload 实例 upload_url 含 MultiDocUploadByWorkflow & docfiletype=1
-_JS_ANNEX_IDX = (
-    "(function(){var want=-1;"
-    "if(window.SWFUpload&&SWFUpload.instances){for(var k in SWFUpload.instances){"
-    "var u=(SWFUpload.instances[k].settings||{}).upload_url||'';"
-    "if(u.indexOf('MultiDocUploadByWorkflow')>=0&&u.indexOf('docfiletype=1')>=0){"
-    "var n=parseInt(k.replace(/[^0-9]/g,''),10);if(!isNaN(n))want=n;}}}return want;})()")
+# 找出“文档上传”明细表对应的加行按钮 id（$addbuttonN$）
+_JS_ADDBTN = (
+    "(function(){var bs=document.querySelectorAll(\"button[id^='$addbutton']\");"
+    "for(var i=0;i<bs.length;i++){var t=bs[i].closest('table');"
+    "if(t&&/文档上传/.test(t.textContent||''))return bs[i].id;}return '';})()")
+
+# 给“文档上传”明细表行内的 file input 与 文档名称 text input 打标记，返回标记数
+_JS_MARK_ROW = (
+    "(function(){var tds=document.querySelectorAll('td'),tbl=null;"
+    "for(var i=0;i<tds.length;i++){if((tds[i].textContent||'').trim()==='文档上传'){tbl=tds[i].closest('table');break;}}"
+    "if(!tbl)return 0;var rows=tbl.querySelectorAll('tr');var last=rows[rows.length-1];"
+    "var fi=tbl.querySelectorAll('input[type=file]');for(var j=0;j<fi.length;j++)fi[j].setAttribute('data-upl','1');"
+    "var tx=tbl.querySelectorAll('input[type=text]');for(var k=0;k<tx.length;k++)tx[k].setAttribute('data-dname','1');"
+    "return fi.length;})()")
+
+# 文档上传明细表里落定的 docid：hidden field\\d+_\\d+ 且值为纯数字
+_JS_DOCID = (
+    "(function(){var ins=document.querySelectorAll('input[type=hidden]');"
+    "for(var i=0;i<ins.length;i++){var n=ins[i].name||'',v=ins[i].value||'';"
+    "if(/^field\\d+_\\d+$/.test(n)&&/^\\d+$/.test(v))return v;}return '';})()")
 
 
 def _norm_attach_name(src, rec):
@@ -134,41 +147,51 @@ def _norm_attach_name(src, rec):
 
 
 def upload_attachment(page, src, rec, step):
-    """把合同 PDF 作为请求附件上传(泛微 SWFUpload docfiletype=1 通道)。返回 docid。"""
+    """把合同 PDF 传到表单“过程文件上传”明细表：加行->直接 set_input_files 到行内
+    file input(绕开 Flash 的“选取多个文件”按钮)->轮询 docid 落定->补文档名称。"""
     frame = find_annex_frame(page)
     if frame is None:
-        step("附件-定位帧", False, "无 #field-annexupload 帧")
+        step("附件-定位帧", False, "无附件帧")
+        return ""
+    btn_id = frame.evaluate(_JS_ADDBTN)
+    if not btn_id:
+        step("附件-无文档上传表", False)
         return ""
     try:
-        frame.locator("text=过程文件上传").first.click(timeout=3000)
-    except Exception:
-        pass
-    time.sleep(1)
-    idx = frame.evaluate(_JS_ANNEX_IDX)
-    fis = frame.locator("input[type=file]")
-    n = fis.count()
-    if idx is None or idx < 0 or idx >= n:
-        idx = n - 1 if n else -1          # 兜底取最后一个
-    if idx < 0:
-        step("附件-无上传input", False)
+        frame.locator("button[id='%s']" % btn_id).first.click(force=True, timeout=4000)
+    except Exception as e:
+        step("附件-加行", False, str(e)[:80])
         return ""
+    time.sleep(1.5)
     att = _norm_attach_name(Path(src), rec)
+    frame.evaluate(_JS_MARK_ROW)
+    fi = frame.locator("input[type=file][data-upl='1']")
+    if fi.count() == 0:
+        step("附件-无file input", False)
+        return ""
     try:
-        fis.nth(idx).set_input_files(str(att), timeout=8000)
+        fi.last.set_input_files(str(att), timeout=8000)
     except Exception as e:
         step("附件-set_files", False, str(e)[:80])
         return ""
     docid = ""
-    for _ in range(30):
+    for _ in range(35):
         time.sleep(1)
         try:
-            v = frame.locator("#field-annexupload").first.input_value()
+            docid = frame.evaluate(_JS_DOCID)
         except Exception:
-            v = ""
-        if v:
-            docid = v
+            docid = ""
+        if docid:
             break
-    step("附件上传", bool(docid), f"idx={idx} name={att.name} docid={docid}")
+    # 补文档名称(若空)
+    name_val = rec.get("合同名称") or att.stem
+    try:
+        ti = frame.locator("input[type=text][data-dname='1']")
+        if ti.count() and not ti.last.input_value():
+            ti.last.fill(name_val)
+    except Exception:
+        pass
+    step("附件上传", bool(docid), f"name={att.name} docid={docid} 文档名称={name_val}")
     return docid
 
 
@@ -576,6 +599,19 @@ def main():
                 step("保存草稿", ok, f"requestid={reqid}")
                 if ok:
                     write_back(args.row, "已存草稿", reqid)
+                    time.sleep(2)
+                    print("[postsave-url] " + (page.url or ""), flush=True)
+                    try:
+                        vf = find_annex_frame(page) or frame
+                        did = vf.evaluate(_JS_DOCID)
+                        tbl = vf.evaluate(
+                            "(function(){var tds=document.querySelectorAll('td'),t;"
+                            "for(var i=0;i<tds.length;i++){if((tds[i].textContent||'').trim()==='文档上传')"
+                            "{t=tds[i].closest('table');break;}}"
+                            "return t?t.textContent.replace(/\\s+/g,' ').slice(0,120):'no table';})()")
+                        step("存后回读-附件", bool(did), f"docid={did} 表={tbl}")
+                    except Exception as e:
+                        step("存后回读-附件", False, str(e)[:80])
             else:
                 print(f"[hold] 干跑：浏览器保持 {KEEP_OPEN_SECONDS//60} 分钟", flush=True)
                 time.sleep(KEEP_OPEN_SECONDS)
