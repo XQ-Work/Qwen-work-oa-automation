@@ -118,81 +118,144 @@ _JS_ADDBTN = (
     "for(var i=0;i<bs.length;i++){var t=bs[i].closest('table');"
     "if(t&&/文档上传/.test(t.textContent||''))return bs[i].id;}return '';})()")
 
-# 给“文档上传”明细表行内的 file input 与 文档名称 text input 打标记，返回标记数
-_JS_MARK_ROW = (
-    "(function(){var tds=document.querySelectorAll('td'),tbl=null;"
-    "for(var i=0;i<tds.length;i++){if((tds[i].textContent||'').trim()==='文档上传'){tbl=tds[i].closest('table');break;}}"
-    "if(!tbl)return 0;var rows=tbl.querySelectorAll('tr');var last=rows[rows.length-1];"
-    "var fi=tbl.querySelectorAll('input[type=file]');for(var j=0;j<fi.length;j++)fi[j].setAttribute('data-upl','1');"
-    "var tx=tbl.querySelectorAll('input[type=text]');for(var k=0;k<tx.length;k++)tx[k].setAttribute('data-dname','1');"
-    "return fi.length;})()")
 
-# 文档上传明细表里落定的 docid：hidden field\\d+_\\d+ 且值为纯数字
-_JS_DOCID = (
-    "(function(){var ins=document.querySelectorAll('input[type=hidden]');"
-    "for(var i=0;i<ins.length;i++){var n=ins[i].name||'',v=ins[i].value||'';"
-    "if(/^field\\d+_\\d+$/.test(n)&&/^\\d+$/.test(v))return v;}return '';})()")
+def _mark_idx_js(idx):
+    """清旧标记，给第 idx 行(field54276_{idx} 所在 tr)的 file/text input 打标记。"""
+    return (
+        "(function(){var o=document.querySelectorAll('input[data-upl],input[data-dname]');"
+        "for(var x=0;x<o.length;x++){o[x].removeAttribute('data-upl');o[x].removeAttribute('data-dname');}"
+        "var h=document.querySelector(\"input[name='field54276_%d']\");if(!h)return 0;"
+        "var tr=h.closest('tr');if(!tr)return 0;"
+        "var fi=tr.querySelectorAll('input[type=file]');for(var j=0;j<fi.length;j++)fi[j].setAttribute('data-upl','1');"
+        "var tx=tr.querySelectorAll('input[type=text]');for(var k=0;k<tx.length;k++)tx[k].setAttribute('data-dname','1');"
+        "return fi.length;})()") % idx
 
 
-def _norm_attach_name(src, rec):
-    """附件按口径规范命名：采购合同（事项）.pdf / 服务合同（事项）.pdf。"""
-    kw = rec.get("关联关键词") or rec.get("合同名称") or "合同"
-    kind = "服务合同" if "服务" in (rec.get("场景") or "") else "采购合同"
-    target = paths.STATE / f"{kind}（{kw}）.pdf"
-    try:
-        shutil.copy2(src, target)
-        return target
-    except Exception:
-        return src
+def _docid_js(idx):
+    return ("(function(){var h=document.querySelector(\"input[name='field54276_%d']\");"
+            "return h?(h.value||''):'';})()") % idx
 
 
-def upload_attachment(page, src, rec, step):
-    """把合同 PDF 传到表单“过程文件上传”明细表：加行->直接 set_input_files 到行内
-    file input(绕开 Flash 的“选取多个文件”按钮)->轮询 docid 落定->补文档名称。"""
+def _state_js(idx):
+    """返回 'docid|busy'，busy=1 表示该行仍有 Uploading/Pending。"""
+    return ("(function(){var h=document.querySelector(\"input[name='field54276_%d']\");"
+            "var tr=h?h.closest('tr'):null;var t=tr?tr.textContent.replace(/\\s+/g,' '):'';"
+            "var busy=(t.indexOf('Uploading')>=0||t.indexOf('Pending')>=0)?1:0;"
+            "return (h?(h.value||''):'')+'|'+busy;})()") % idx
+
+
+# 推 SWFUpload 队列(多文件时第一文件完成后需再 startUpload 才带上后续文件)
+_JS_STARTQ = (
+    "(function(){if(window.SWFUpload&&SWFUpload.instances){for(var k in SWFUpload.instances){"
+    "try{var u=SWFUpload.instances[k];if(u.getStats().files_queued>0)u.startUpload();}catch(e){}}}})()")
+
+
+# 附件取件根目录（测试期=文档整理；最终位置待定，见 backlog）
+ATTACH_ROOT = paths.DATA / "OA附件库" / "文档整理"
+# 4 个必传件（材料名），文件名规则 = 材料名（事项）.pdf
+REQUIRED_DOCS = ["事项审批", "比质比价报告单", "供应商报价单及资质", "采购合同"]
+
+
+def resolve_attachments(kw, root=None, contract_path=None):
+    """按 材料名（kw）.pdf 在 root 递归找 4 必传件；缺任一则抛 FileNotFoundError。
+    采购合同优先用台账 J 列路径。排除 已用印/盖章/扫描 版。"""
+    root = Path(root or ATTACH_ROOT)
+    got, missing = {}, []
+    for base in REQUIRED_DOCS:
+        f = None
+        if base == "采购合同" and contract_path and Path(contract_path).exists():
+            f = Path(contract_path)
+        else:
+            want = f"{base}（{kw}）.pdf"
+            for cand in sorted(root.rglob(want)):
+                if any(s in cand.name for s in ("已用印", "盖章", "扫描")):
+                    continue
+                f = cand
+                break
+        if f is None:
+            missing.append(f"{base}（{kw}）.pdf")
+        else:
+            got[base] = f
+    if missing:
+        raise FileNotFoundError("缺少文件：" + "、".join(missing))
+    return got
+
+
+def upload_attachment(page, got, rec, step):
+    """固定 3 行上传到“过程文件上传”明细表：
+    行1 事项审批 / 行2 比质比价报告单+供应商报价单及资质 / 行3 采购合同。
+    每行:加行->直接 set_input_files 到行内 file input(绕开 Flash 按钮)->轮询 docid 稳定->填文档名称。"""
     frame = find_annex_frame(page)
     if frame is None:
         step("附件-定位帧", False, "无附件帧")
-        return ""
+        return False
     btn_id = frame.evaluate(_JS_ADDBTN)
     if not btn_id:
         step("附件-无文档上传表", False)
-        return ""
-    try:
-        frame.locator("button[id='%s']" % btn_id).first.click(force=True, timeout=4000)
-    except Exception as e:
-        step("附件-加行", False, str(e)[:80])
-        return ""
-    time.sleep(1.5)
-    att = _norm_attach_name(Path(src), rec)
-    frame.evaluate(_JS_MARK_ROW)
-    fi = frame.locator("input[type=file][data-upl='1']")
-    if fi.count() == 0:
-        step("附件-无file input", False)
-        return ""
-    try:
-        fi.last.set_input_files(str(att), timeout=8000)
-    except Exception as e:
-        step("附件-set_files", False, str(e)[:80])
-        return ""
-    docid = ""
-    for _ in range(35):
-        time.sleep(1)
+        return False
+    kw = rec.get("关联关键词") or rec.get("合同名称") or ""
+    kind = "服务合同" if "服务" in (rec.get("场景") or "") else "采购合同"
+    rows = [
+        (["事项审批"], "事项审批"),
+        (["比质比价报告单", "供应商报价单及资质"], "比质比价报告单、供应商报价单及资质"),
+        (["采购合同"], rec.get("合同名称") or f"{kw}{kind}"),
+    ]
+    # 阶段1：逐行加行 + 塞文件 + 推队列(不在此死等,并发上传交给阶段2统一收口)
+    added = []
+    for idx, (files, dname) in enumerate(rows):
         try:
-            docid = frame.evaluate(_JS_DOCID)
-        except Exception:
-            docid = ""
-        if docid:
+            frame.locator("button[id='%s']" % btn_id).first.click(force=True, timeout=4000)
+        except Exception as e:
+            step(f"附件-行{idx+1}加行", False, str(e)[:60]); continue
+        time.sleep(1.5)
+        frame.evaluate(_mark_idx_js(idx))
+        fi = frame.locator("input[type=file][data-upl='1']")
+        if fi.count() == 0:
+            step(f"附件-行{idx+1}", False, "无file input"); continue
+        plist = [str(got[b]) for b in files]
+        try:
+            fi.last.set_input_files(plist, timeout=8000)
+            frame.evaluate(_JS_STARTQ)
+            added.append(idx)
+        except Exception as e:
+            step(f"附件-行{idx+1}塞文件", False, str(e)[:70])
+    # 阶段2：统一收口轮询,直到所有已加行 docid 落定且无 Uploading/Pending
+    docids = {}
+    for _ in range(90):
+        time.sleep(1)
+        frame.evaluate(_JS_STARTQ)          # 持续推队列,确保多文件/并发都带上
+        allok = bool(added)
+        for idx in added:
+            try:
+                raw = frame.evaluate(_state_js(idx)) or "|"
+            except Exception:
+                raw = "|"
+            d, b = (raw.split("|") + ["0"])[:2]
+            docids[idx] = d
+            if not d or d == "NULL" or b != "0":
+                allok = False
+        if allok:
             break
-    # 补文档名称(若空)
-    name_val = rec.get("合同名称") or att.stem
-    try:
-        ti = frame.locator("input[type=text][data-dname='1']")
-        if ti.count() and not ti.last.input_value():
-            ti.last.fill(name_val)
-    except Exception:
-        pass
-    step("附件上传", bool(docid), f"name={att.name} docid={docid} 文档名称={name_val}")
-    return docid
+    # 阶段3：填各行文档名称
+    for idx, (files, dname) in enumerate(rows):
+        if idx not in added:
+            continue
+        frame.evaluate(_mark_idx_js(idx))
+        try:
+            ti = frame.locator("input[type=text][data-dname='1']")
+            if ti.count() and not ti.last.input_value():
+                ti.last.fill(dname)
+        except Exception:
+            pass
+    # 阶段4：据实逐行报告
+    allok = True
+    for idx, (files, dname) in enumerate(rows):
+        d = docids.get(idx, "")
+        ok = bool(d and d != "NULL")
+        step(f"附件-行{idx+1}[{dname}]", ok,
+             " + ".join(got[b].name for b in files) + f" docid={d}")
+        allok = allok and ok
+    return allok
 
 
 def sel(frame, fid, label):
@@ -527,6 +590,15 @@ def main():
     attach = not args.no_attach
     rec = read_row(args.row)
     br = read_branch(rec["场景"])
+    attach_files = None
+    if attach:
+        try:
+            attach_files = resolve_attachments(
+                rec.get("关联关键词") or "", contract_path=rec.get("合同路径"))
+            print("[附件] 4件齐：" + " | ".join(
+                f"{k}={v.name}" for k, v in attach_files.items()), flush=True)
+        except FileNotFoundError as e:
+            raise SystemExit(f"[附件] {e} —— 已中止(不填表/不上传/不保存)")
     report = {"row": args.row, "rec": rec, "branch": br, "steps": []}
 
     def step(name, ok, err=""):
@@ -558,15 +630,11 @@ def main():
             page.screenshot(path=str(paths.STATE / "contract_filled.png"),
                             full_page=True)
             step("整页截图", True)
-            if attach:
-                src = rec.get("合同路径") or ""
-                if src and Path(src).exists():
-                    try:
-                        upload_attachment(page, src, rec, step)
-                    except Exception as e:
-                        step("附件上传", False, str(e)[:100])
-                else:
-                    step("附件上传", False, f"合同路径缺失/不存在: {src!r}")
+            if attach and attach_files:
+                try:
+                    upload_attachment(page, attach_files, rec, step)
+                except Exception as e:
+                    step("附件上传", False, str(e)[:100])
             (paths.STATE / "contract_report.json").write_text(
                 json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
             if args.save:
@@ -603,13 +671,15 @@ def main():
                     print("[postsave-url] " + (page.url or ""), flush=True)
                     try:
                         vf = find_annex_frame(page) or frame
-                        did = vf.evaluate(_JS_DOCID)
                         tbl = vf.evaluate(
                             "(function(){var tds=document.querySelectorAll('td'),t;"
                             "for(var i=0;i<tds.length;i++){if((tds[i].textContent||'').trim()==='文档上传')"
                             "{t=tds[i].closest('table');break;}}"
-                            "return t?t.textContent.replace(/\\s+/g,' ').slice(0,120):'no table';})()")
-                        step("存后回读-附件", bool(did), f"docid={did} 表={tbl}")
+                            "if(!t)return 'no table';"
+                            "var ids=[];t.querySelectorAll('input[type=hidden]').forEach(function(e){"
+                            "if(/^field\\d+_\\d+$/.test(e.name)&&/^\\d/.test(e.value||''))ids.push(e.name+'='+e.value);});"
+                            "return t.textContent.replace(/\\s+/g,' ').slice(0,160)+' || docids:'+ids.join(',');})()")
+                        step("存后回读-附件", "docids:" in tbl and "=" in tbl.split("docids:")[-1], tbl)
                     except Exception as e:
                         step("存后回读-附件", False, str(e)[:80])
             else:
