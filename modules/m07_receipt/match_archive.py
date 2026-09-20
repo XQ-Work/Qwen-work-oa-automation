@@ -14,6 +14,7 @@
 """
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -27,6 +28,10 @@ from openpyxl import load_workbook  # noqa: E402
 回单台账 = 回单目录 / "付款回单台账.xlsx"
 档案根 = paths.DATA / "OA附件库/文档整理/采购项目档案"
 LOG = 回单目录 / "项目归档记录.json"
+
+
+def line0(rec):
+    return f"[{rec['日期']}] {rec['收款人']} {rec['金额']}元 «{rec['摘要']}»"
 
 
 def _f(v):
@@ -87,6 +92,21 @@ def _is_sample(ws, r):
         if "示例" in str(ws.cell(r, c).value or ""):
             return True
     return False
+
+
+def lane_b_folders(摘要):
+    """Lane B(<2000 无合同)：回单摘要里含哪个项目文件夹的事项名，就归哪个项目夹。
+    要求转账时把事项名写进摘要（今后约定）。返回 [(文件夹, 事项名)]。"""
+    if not 摘要:
+        return []
+    hits = []
+    for d in sorted(档案根.iterdir()):
+        if not d.is_dir():
+            continue
+        m = re.match(r"\d{4}-\d{3}-(.+)", d.name)
+        if m and len(m.group(1)) >= 2 and m.group(1) in 摘要:
+            hits.append((d, m.group(1)))
+    return hits
 
 
 def match_ledgers(name, amt):
@@ -150,13 +170,28 @@ def main():
             continue
         img = receipt_image(rec["收款人"], rec["金额"])
         src, row, proj = match_ledgers(rec["收款人"], rec["金额"])
-        line = (f"[{rec['日期']}] {rec['收款人']} {rec['金额']}元 «{rec['摘要']}»"
-                f" → {src or '未匹配'}#{row or '-'} 项目名={proj or '-'}")
+        pdir = None
+        # Lane A：合同/付款台账命中
+        if src:
+            line = (f"[{rec['日期']}] {rec['收款人']} {rec['金额']}元 «{rec['摘要']}»"
+                    f" → {src}#{row} 项目名={proj}")
+            pdir = find_project_dir(proj)
+        else:
+            # Lane B：<2000 无合同，按摘要里的事项名归项目夹（转账时须写明事项名）
+            lb = lane_b_folders(rec["摘要"])
+            if len(lb) == 1:
+                pdir, proj = lb[0]
+                src, row = "事项审批(摘要)", 0
+                line = (f"[{rec['日期']}] {rec['收款人']} {rec['金额']}元 «{rec['摘要']}»"
+                        f" → LaneB 项目名={proj}")
+            elif len(lb) > 1:
+                n_manual += 1
+                print(line0(rec) + f"  [Lane B歧义]{[p.name for p, _ in lb]}")
+                continue
         if not src or not img:
             n_manual += 1
             print(line + ("" if img else "  [缺回单图]"))
             continue
-        pdir = find_project_dir(proj)
         if not pdir:
             n_manual += 1
             print(line + "  [未找到项目文件夹]")
