@@ -252,6 +252,7 @@ def main():
                     help="付款附件匹配键(事项简称)")
     ap.add_argument("--check-attach", action="store_true",
                     help="只检查5必传附件是否齐(不开浏览器),配 --项目名 用")
+    ap.add_argument("--no-attach", action="store_true", help="跳过附件解析/上传")
     ap.add_argument("--save", action="store_true")
     args = ap.parse_args()
 
@@ -299,7 +300,9 @@ def main():
         raise SystemExit("缺少收款单位或付款金额（用 --row 读台账 / --invoice 解析 / 或显式传 --payee --amount）")
 
     # 付款信息行附件：显式 --attach 优先；否则按项目名解析 5 必传件（缺件 fail-fast 中止）
-    if args.attach:
+    if args.no_attach:
+        pay_atts = []
+    elif args.attach:
         pay_atts = [Path(a) for a in args.attach if Path(a).exists()]
     elif args.项目名:
         pay_atts, miss = resolve_pay_attachments(args.项目名)
