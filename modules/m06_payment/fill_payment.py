@@ -69,27 +69,34 @@ def write_ledger(r, reqid):
 
 # 付款附件搜索根（测试期=采购项目档案；功能全好后统一改位置）
 ATTACH_PAY_ROOT = paths.DATA / "OA附件库/文档整理/采购项目档案"
-# 5 必传：glob 模式（项目名代入 {}）
+# 5 必传：每类可给多个 glob 模式（{} 代入项目名）
 PAY_PATTERNS = [
-    ("事项审批", "事项审批（{}）.pdf"),
-    ("流程会签", "流程会签（{}）.pdf"),
-    ("采购合同", "采购合同（{} 已用印）.pdf"),
-    ("发票", "发票（{}）.pdf"),
-    ("付款单", "付款单*（{}）.pdf"),
+    ("事项审批", ["事项审批（{}）.pdf"]),
+    ("流程会签", ["流程会签（{}）.pdf"]),
+    ("采购合同", ["采购合同（{} 已用印）.pdf"]),
+    ("发票", ["发票（{}）.pdf"]),
+    # 付款单：合并件“付款单…（项目名）”或标题件“(071501)…{项目名}采购/服务合同付款”
+    ("付款单", ["付款单*（{}）.pdf",
+              "*{}采购合同付款*.pdf", "*{}服务合同付款*.pdf"]),
 ]
 
 
 def resolve_pay_attachments(项目名, root=None):
-    """按项目名在付款附件根目录递归找 5 必传件。返回 (files:list[Path], missing:list[str])。"""
+    """按项目名在付款附件根目录递归找 5 必传件（每类多模式，命中任一即可）。
+    返回 (files:list[Path], missing:list[str])。"""
     root = Path(root or ATTACH_PAY_ROOT)
     files, missing = [], []
-    for label, pat in PAY_PATTERNS:
-        hits = sorted(root.rglob(pat.format(项目名)))
-        hits = [h for h in hits if "扫描" not in h.name]
-        if hits:
-            files.extend(hits)
+    for label, pats in PAY_PATTERNS:
+        hits = []
+        for pat in pats:
+            hits += [h for h in sorted(root.rglob(pat.format(项目名)))
+                     if "扫描" not in h.name]
+        # 去重
+        uniq = {str(h): h for h in hits}.values()
+        if uniq:
+            files.extend(uniq)
         else:
-            missing.append(pat.format(项目名))
+            missing.append(pats[0].format(项目名))
     return files, missing
 
 
