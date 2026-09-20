@@ -37,6 +37,9 @@ F = {
     "收款单位信息": "field43298",
 }
 
+# 付款标题模板：(071501)水务付款申请-荆州荆清-肖桥-{合同名称}付款
+PAY_TITLE_PREFIX = "(071501)水务付款申请-荆州荆清-肖桥-"
+
 LEDGER = paths.DATA / "付款发起台账.xlsx"
 LSHEET = "付款台账"
 L = {2: "合同名称", 3: "付款单位", 4: "收款单位", 5: "付款金额",
@@ -75,9 +78,8 @@ PAY_PATTERNS = [
     ("流程会签", ["流程会签（{}）.pdf"]),
     ("采购合同", ["采购合同（{} 已用印）.pdf"]),
     ("发票", ["发票（{}）.pdf"]),
-    # 付款单：合并件“付款单…（项目名）”或标题件“(071501)…{项目名}采购/服务合同付款”
-    ("付款单", ["付款单*（{}）.pdf",
-              "*{}采购合同付款*.pdf", "*{}服务合同付款*.pdf"]),
+    # 付款单：以“付款单”开头、括号含项目名的合并件（如 付款单、发票（空压机）.pdf）
+    ("付款单", ["付款单*（{}）.pdf"]),
 ]
 
 
@@ -389,6 +391,14 @@ def main():
             if args.inv_no or args.inv_date or args.inv_amount:
                 fill_einvoice(frame, 0, args.inv_no, args.inv_date,
                               args.inv_amount or args.amount, step)
+            # 标题（放最后设，避免被 changeKeyword 重生成覆盖）
+            if args.contract_name:
+                title = PAY_TITLE_PREFIX + args.contract_name + "付款"
+                try:
+                    m05.txt(frame, "requestname", title)
+                    step(f"标题={title}", True)
+                except Exception as e:
+                    step("标题", False, str(e)[:60])
 
             time.sleep(2)
             page.screenshot(path=str(paths.STATE / "payment_filled.png"), full_page=True)
