@@ -67,6 +67,32 @@ def write_ledger(r, reqid):
     wb.save(LEDGER)
 
 
+# 付款附件搜索根（测试期=采购项目档案；功能全好后统一改位置）
+ATTACH_PAY_ROOT = paths.DATA / "OA附件库/文档整理/采购项目档案"
+# 5 必传：glob 模式（项目名代入 {}）
+PAY_PATTERNS = [
+    ("事项审批", "事项审批（{}）.pdf"),
+    ("流程会签", "流程会签（{}）.pdf"),
+    ("采购合同", "采购合同（{} 已用印）.pdf"),
+    ("发票", "发票（{}）.pdf"),
+    ("付款单", "付款单*（{}）.pdf"),
+]
+
+
+def resolve_pay_attachments(项目名, root=None):
+    """按项目名在付款附件根目录递归找 5 必传件。返回 (files:list[Path], missing:list[str])。"""
+    root = Path(root or ATTACH_PAY_ROOT)
+    files, missing = [], []
+    for label, pat in PAY_PATTERNS:
+        hits = sorted(root.rglob(pat.format(项目名)))
+        hits = [h for h in hits if "扫描" not in h.name]
+        if hits:
+            files.extend(hits)
+        else:
+            missing.append(pat.format(项目名))
+    return files, missing
+
+
 def set_money(frame, fid, val):
     """金额字段：真值框 fid 默认不可见(_format 只读显示)。JS 写值+派发 change/blur
     触发 OA checkFloat 自动格式化并算大写。"""
@@ -215,6 +241,10 @@ def main():
     ap.add_argument("--attach", nargs="*", default=[], help="付款信息附件路径")
     ap.add_argument("--invoice", default="", help="电子发票PDF,自动解析收款/金额/发票号/日期")
     ap.add_argument("--row", type=int, default=0, help="从付款台账读取第N行")
+    ap.add_argument("--项目名", "--xm", dest="项目名", default="",
+                    help="付款附件匹配键(事项简称)")
+    ap.add_argument("--check-attach", action="store_true",
+                    help="只检查5必传附件是否齐(不开浏览器),配 --项目名 用")
     ap.add_argument("--save", action="store_true")
     args = ap.parse_args()
 
@@ -229,6 +259,27 @@ def main():
         args.inv_no = rec.get("发票号码") or args.inv_no
         args.inv_date = rec.get("开票日期") or args.inv_date
         args.inv_amount = rec.get("付款金额") or args.inv_amount
+        args.项目名 = args.项目名 or rec.get("项目名") or ""
+    # 项目名兜底：从合同名称去掉“采购合同/服务合同”
+    if not args.项目名 and args.contract_name:
+        cn = args.contract_name
+        for suf in ("采购合同", "服务合同", "合同"):
+            if cn.endswith(suf) and len(cn) > len(suf):
+                cn = cn[:-len(suf)]; break
+        args.项目名 = cn
+    # 只检查附件模式
+    if args.check_attach:
+        if not args.项目名:
+            raise SystemExit("请给 --项目名（事项简称）")
+        files, missing = resolve_pay_attachments(args.项目名)
+        print(f"项目名={args.项目名}")
+        for f in files:
+            print("  [有]", f.name, "@", f.parent.name)
+        if missing:
+            print("  [缺]", "、".join(missing))
+        else:
+            print("  ✅ 5 必传齐全")
+        return
     if args.invoice:
         import parse_invoice as pi
         inv = pi.parse(Path(args.invoice))
@@ -239,6 +290,17 @@ def main():
         args.inv_amount = args.inv_amount or inv["价税合计"]
     if not args.payee or not args.amount:
         raise SystemExit("缺少收款单位或付款金额（用 --row 读台账 / --invoice 解析 / 或显式传 --payee --amount）")
+
+    # 付款信息行附件：显式 --attach 优先；否则按项目名解析 5 必传件（缺件 fail-fast 中止）
+    if args.attach:
+        pay_atts = [Path(a) for a in args.attach if Path(a).exists()]
+    elif args.项目名:
+        pay_atts, miss = resolve_pay_attachments(args.项目名)
+        if miss:
+            raise SystemExit(f"[附件] 项目名『{args.项目名}』缺必传件：{'、'.join(miss)} —— 已中止(不开浏览器)")
+        print("[附件] 5 必传齐：" + " | ".join(f.name for f in pay_atts), flush=True)
+    else:
+        pay_atts = []
 
     def step(name, ok, err=""):
         print(f"[{'ok ' if ok else 'ERR'}] {name} {err}", flush=True)
@@ -313,8 +375,7 @@ def main():
             # 付款信息明细行：费用说明/发票张数/费用金额 + 附件
             cn = args.contract_name or ""
             desc = f"{cn}，已完成入库验收，按照合同约定付款{args.amount}元"
-            atts = [Path(a) for a in args.attach if Path(a).exists()]
-            fill_payinfo(frame, 0, desc, args.amount, args.invoices, atts, step)
+            fill_payinfo(frame, 0, desc, args.amount, args.invoices, pay_atts, step)
             if args.inv_no or args.inv_date or args.inv_amount:
                 fill_einvoice(frame, 0, args.inv_no, args.inv_date,
                               args.inv_amount or args.amount, step)
