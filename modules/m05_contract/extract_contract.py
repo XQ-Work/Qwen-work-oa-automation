@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from oa_common import paths  # noqa: E402
 from openpyxl import load_workbook  # noqa: E402
 
-LEDGER = paths.DATA / "合同发起台账.xlsx"
+LEDGER = paths.LEDGER_CONTRACT
 SHEET = "合同台账"
 # 台账列（与 m05 的 L 对齐）
 COL = {2: "场景", 3: "合同名称", 4: "金额", 5: "甲方", 6: "乙方",
@@ -307,6 +307,29 @@ def main():
     wb.save(target)
     act = "新增" if appended else "更新"
     print(f"[ok] {act}台账第{r}行（状态=待确认，核对后跑 fill_contract）→ {target.name}")
+
+    # 金额链主档：合同金额=法律口径，并据此改判 ≥2000 分流道
+    try:
+        from oa_common import moneyline
+        code, matter = moneyline.resolve_code(keyword, path)
+        wb = load_workbook(target)
+        ws = wb[SHEET]
+        if code:
+            ws.cell(row=r, column=15, value=code)
+        wb.save(target)
+        if code and rec["含税总价"]:
+            moneyline.set_amount(code, matter, "contract", rec["含税总价"], source=path.name)
+            tx = moneyline.extract_tax(text)
+            if tx:
+                moneyline.set_tax(code, tx)
+            moneyline.upsert_project(code, matter, category=scene)
+            lane = "A(≥2000 走合同)" if float(str(rec["含税总价"]).replace(",", "")) >= 2000 \
+                else "B(<2000 可无合同)"
+            print(f"[moneyline] {code} 合同金额={rec['含税总价']} 分流道={lane}（台账15列已写编号）")
+        elif not code:
+            print("[moneyline] 未能从路径/关键词定位项目编号，跳过主档登记")
+    except Exception as e:
+        print(f"[moneyline] 主档登记失败（不影响台账）: {e}")
 
 
 if __name__ == "__main__":

@@ -20,8 +20,8 @@ from oa_common import paths, auth, db  # noqa: E402
 from openpyxl import load_workbook  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
-LEDGER = paths.DATA / "合同发起台账.xlsx"
-BRANCH = paths.DATA / "合同分支映射表.xlsx"
+LEDGER = paths.LEDGER_CONTRACT
+BRANCH = paths.BRANCH_MAP
 WF = "476402"
 ADD = ("/workflow/request/AddRequest.jsp?workflowid=" + WF +
        "&isagent=0&beagenter=0&f_weaver_belongto_userid=")
@@ -154,7 +154,7 @@ _JS_STARTQ = (
 
 
 # 附件取件根目录（测试期=文档整理；最终位置待定，见 backlog）
-ATTACH_ROOT = paths.DATA / "OA附件库" / "文档整理"
+ATTACH_ROOT = paths.ARCHIVE.parent  # 文档整理根
 # 4 个必传件（材料名），文件名规则 = 材料名（事项）.pdf
 REQUIRED_DOCS = ["事项审批", "比质比价报告单", "供应商报价单及资质", "采购合同"]
 

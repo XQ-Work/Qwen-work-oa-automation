@@ -16,8 +16,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from oa_common import paths, db  # noqa: E402
 
-TPL_BATCH = paths.TPL / "比质比价报告单（批量）.doc"
-TPL_SERVICE = paths.TPL / "比质比价报告单（服务）.doc"
+TPL_BATCH = paths.TPL_BIZ / "比质比价报告单（批量）.doc"
+TPL_SERVICE = paths.TPL_BIZ / "比质比价报告单（服务）.doc"
 
 
 def _norm(s):
@@ -134,6 +134,11 @@ def cmd_gen(a):
         " VALUES(?,?,?,?,?,?)",
         (matter["id"], cat, low["supplier_name"], str(out_doc), "待确认", db.now()))
     conn.commit()
+    try:
+        from oa_common import deliver      # 交付区多存一份（docx 优先）
+        deliver.stage("比质比价报告单", [out_docx if out_docx.exists() else out_doc], product)
+    except Exception as e:
+        print("  [交付] 副本失败(不影响生成):", str(e)[:60])
     print(f"[ok] 生成（{cat}）：{out_doc}")
     print(f"[推荐] 最低价 {low['supplier_name']} {low['price']} —— 请核对后确认")
 

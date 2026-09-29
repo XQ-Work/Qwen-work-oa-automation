@@ -37,7 +37,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 import sys as _sys
 _sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[2]))
 from oa_common import paths as _paths
-BASE_DIR = str(_paths.DATA / "转账回单")   # 收编进套件:指向新工作区
+BASE_DIR = str(_paths.RECEIPT_DIR)   # 收编进套件:指向新工作区
 INPUT_DIR = os.path.join(BASE_DIR, "输入")
 DONE_DIR = os.path.join(BASE_DIR, "已完成")
 OUTPUT_XLSX = os.path.join(BASE_DIR, "付款回单台账.xlsx")

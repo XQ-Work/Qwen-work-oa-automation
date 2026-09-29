@@ -23,7 +23,7 @@ import re
 import sys
 from pathlib import Path
 import sys as _sys
-_sys.path.insert(0, r"D:/自动备份/Qwen work/自动化（OA流程）/oa-automation")
+_sys.path.insert(0, r"D:/自动备份/Qwen work/自动化（OA流程）/系统/oa-automation")
 from oa_common import paths
 
 from openpyxl import load_workbook
@@ -31,7 +31,7 @@ from openpyxl.cell.cell import MergedCell
 from openpyxl.utils import column_index_from_string
 
 BASE = paths.STATE
-TPL_DIR = paths.TPL
+TPL_DIR = paths.TPL_SG
 INBOX = paths.INBOX
 # 模板关键词、表头单元格、明细表列布局（1 基）
 TPL = {
@@ -108,6 +108,8 @@ def gen(req):
 
     out = INBOX / f"申购单（{name}-金额：{_fmt_amt(amt)}）.xlsx"
     wb.save(out)
+    from oa_common import deliver          # 交付区：转PDF+按事项合并
+    deliver.stage("申购单", [out], name)
     print(f"[ok] 生成 {out.name}（{cat}类，{len(rows)}行明细）")
     return out
 

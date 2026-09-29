@@ -11,7 +11,7 @@ import re
 import sys
 from pathlib import Path
 import sys as _sys
-_sys.path.insert(0, r"D:/自动备份/Qwen work/自动化（OA流程）/oa-automation")
+_sys.path.insert(0, r"D:/自动备份/Qwen work/自动化（OA流程）/系统/oa-automation")
 from oa_common import paths
 
 BASE = paths.STATE

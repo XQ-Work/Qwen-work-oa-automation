@@ -40,7 +40,7 @@ F = {
 # 付款标题模板：(071501)水务付款申请-荆州荆清-肖桥-{合同名称}付款
 PAY_TITLE_PREFIX = "(071501)水务付款申请-荆州荆清-肖桥-"
 
-LEDGER = paths.DATA / "付款发起台账.xlsx"
+LEDGER = paths.LEDGER_PAY
 LSHEET = "付款台账"
 L = {2: "合同名称", 3: "付款单位", 4: "收款单位", 5: "付款金额",
      6: "采购类事项类型", 7: "发票号码", 8: "开票日期", 9: "费用说明",
@@ -70,8 +70,38 @@ def write_ledger(r, reqid):
     wb.save(LEDGER)
 
 
+def moneyline_record(r, reqid):
+    """金额链主档：存草稿成功后登记付款行（性质按 费用说明→合同名→文件名 取词），
+    并把项目编号回写台账第15列。"""
+    from oa_common import moneyline
+    rec = read_ledger(r)
+    inv_path = rec.get("发票路径", "")
+    code, matter = moneyline.resolve_code(_proj_name(rec.get("合同名称", "")), inv_path)
+    if not code:
+        print("[moneyline] 未能定位项目编号，跳过主档登记（可人工 python -m oa_common.moneyline）")
+        return
+    from openpyxl import load_workbook
+    wb = load_workbook(LEDGER)
+    wb[LSHEET].cell(r, 15, code)
+    wb.save(LEDGER)
+    moneyline.add_payment(code, matter, rec.get("付款金额") or 0,
+                          payee=rec.get("收款单位", ""),
+                          nature_src=(rec.get("费用说明", ""), rec.get("合同名称", ""),
+                                      Path(inv_path).name),
+                          ledger="付款台账", row=r, requestid=reqid)
+    print(f"[moneyline] {code} 付款行已登记 row{r} "
+          f"{moneyline.nature_of(rec.get('费用说明',''), rec.get('合同名称',''))}（台账15列已写编号）")
+
+
+def _proj_name(合同名称):
+    for suf in ("采购合同", "服务合同", "合同"):
+        if 合同名称.endswith(suf) and len(合同名称) > len(suf):
+            return 合同名称[:-len(suf)]
+    return 合同名称
+
+
 # 付款附件搜索根（测试期=采购项目档案；功能全好后统一改位置）
-ATTACH_PAY_ROOT = paths.DATA / "OA附件库/文档整理/采购项目档案"
+ATTACH_PAY_ROOT = paths.ARCHIVE
 # 5 必传：每类可给多个 glob 模式（{} 代入项目名）
 PAY_PATTERNS = [
     ("事项审批", ["事项审批（{}）.pdf"]),
@@ -433,6 +463,10 @@ def main():
                 if ok and args.row:
                     write_ledger(args.row, reqid)
                     step("台账回写", True, f"row{args.row} 已存草稿 {reqid}")
+                    try:
+                        moneyline_record(args.row, reqid)
+                    except Exception as e:
+                        step("金额链主档", False, str(e)[:80])
         finally:
             time.sleep(1)
             try:

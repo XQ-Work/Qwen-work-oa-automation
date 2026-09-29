@@ -11,7 +11,7 @@ import json
 import time
 from pathlib import Path
 import sys as _sys
-_sys.path.insert(0, r"D:/自动备份/Qwen work/自动化（OA流程）/oa-automation")
+_sys.path.insert(0, r"D:/自动备份/Qwen work/自动化（OA流程）/系统/oa-automation")
 from oa_common import paths
 
 from openpyxl import load_workbook
@@ -104,7 +104,7 @@ COLS = {  # 台账列号 -> 键（v3：无项目编号列）
     11: "内容覆盖", 12: "附件", 13: "状态",
 }
 
-STAGING_DIR = paths.STAGING
+STAGING_DIR = None  # 待发起区已退役（2026-09-28）：附件走 输入→项目档案 链路
 ARCHIVE_DIR = paths.ARCHIVE
 
 
@@ -122,20 +122,9 @@ def _find_by_prefix(root, prefix):
 
 
 def match_annexes(subject):
-    """附件匹配优先级（收件箱在 resolve_annexes 里更优先）：
-    1 待发起\\{事由}-*\\ 全部文件
-    2 待发起 顶层文件名以事由开头
-    3 采购项目档案\\*\\{事由核心词}*\\01_事项审批\\（老项目兜底）
+    """档案兜底（收件箱在 resolve_annexes 里更优先）：
+    采购项目档案\\*\\{事由核心词}*\\01_事项审批\\ 内文件
     """
-    proj = _find_by_prefix(STAGING_DIR, subject)
-    if proj:
-        return _files_in(proj)
-    if STAGING_DIR.is_dir():
-        hits = [str(x) for x in STAGING_DIR.iterdir()
-                if x.is_file() and x.suffix.lower() in ANNEX_EXTS
-                and x.stem.startswith(subject)]
-        if hits:
-            return sorted(hits)
     if ARCHIVE_DIR.is_dir():
         keys = [_norm(k) for k in subject_keys(subject)]
         for proj in sorted(ARCHIVE_DIR.iterdir()):
@@ -195,7 +184,7 @@ def inbox_match(subject):
 
 
 def resolve_annexes(rec):
-    """统一附件解析，返回 (文件列表, 来源说明)。优先级：手填>收件箱>待发起>档案"""
+    """统一附件解析，返回 (文件列表, 来源说明)。优先级：手填>收件箱>项目档案兜底"""
     if rec.get("附件"):
         return prepare_annexes(rec["附件"]), "手填路径"
     files = inbox_match(rec["事由"])
@@ -203,7 +192,7 @@ def resolve_annexes(rec):
         return files, f"收件箱({INBOX})"
     files = match_annexes(rec["事由"])
     if files:
-        return files, "待发起/档案兜底"
+        return files, "项目档案兜底"
     return [], "无匹配"
 
 
@@ -211,7 +200,7 @@ def sanitize_upload_names(files):
     """上传副本改名：去掉文件名中的“金额：X”段（本地留痕原名，OA 显示干净名）"""
     import re as _re
     import shutil
-    up = BASE / "upload_tmp"
+    up = paths.STATE / "upload_tmp"   # 机器房临时件，不留在业务视野
     up.mkdir(exist_ok=True)
     outs = []
     for f in files:
@@ -318,6 +307,19 @@ def do_archive(rec, rownum, flow_no="", dry=False, status="已归档"):
             ws.cell(row=rownum, column=14, value=flow_no)
         ws.cell(row=rownum, column=15,
                 value=datetime.datetime.now().strftime("%Y-%m-%d %H:%M"))
+        # 金额链：项目编号写17列 + 审批金额入主档
+        try:
+            from oa_common import moneyline
+            code, matter = moneyline.resolve_code(rec["事由"], dest_root.name)
+            if code:
+                ws.cell(row=rownum, column=17, value=code)
+                wb.save(LEDGER)
+                if rec.get("金额"):
+                    moneyline.set_amount(code, matter, "appr", rec["金额"],
+                                         source=f"事项审批台账row{rownum}")
+                    print(f"[moneyline] {code} 审批金额={rec['金额']} 已入主档")
+        except Exception as e:
+            print(f"[moneyline] 主档登记失败（不影响归档）: {e}")
         wb.save(LEDGER)
         print(f"[archive] 台账第{rownum}行回写：状态={status}"
               + (f"，编号={flow_no}" if flow_no else "") + f"，移动{moved}个文件")
@@ -389,7 +391,7 @@ def main():
             frame.locator("textarea[name=field496130]").first.fill(content)
             step("填事项内容", True, content[:60])
 
-            # 附件：手填路径 > 发起收件箱甄别 > 待发起/档案
+            # 附件：手填路径 > 收件箱 > 项目档案兜底
             if args.no_annex:
                 step("上传附件", None, "跳过")
             else:

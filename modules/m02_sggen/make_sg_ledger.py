@@ -6,7 +6,7 @@ from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.utils import get_column_letter
 
 import sys as _sys2
-_sys2.path.insert(0, r"D:/自动备份/Qwen work/自动化（OA流程）/oa-automation")
+_sys2.path.insert(0, r"D:/自动备份/Qwen work/自动化（OA流程）/系统/oa-automation")
 from oa_common import paths as _paths
 OUT = str(_paths.LEDGER_SG)
 

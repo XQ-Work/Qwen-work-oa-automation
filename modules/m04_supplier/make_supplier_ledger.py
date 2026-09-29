@@ -5,7 +5,8 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.utils import get_column_letter
 
-OUT = r"D:\自动备份\Qwen work\自动化（OA流程）\供应商建档台账.xlsx"
+import sys as _s; _s.path.insert(0, r"D:\自动备份\Qwen work\自动化（OA流程）\系统\oa-automation"); from oa_common import paths as _p
+OUT = str(_p.LEDGER_SUPPLIER)
 
 HEADERS = [
     ("序号", 6), ("供应商名称*", 26), ("供应商分类*", 14), ("供应商所属类型*", 14),
@@ -38,12 +39,12 @@ fills = {2: YELLOW, 3: YELLOW, 4: YELLOW, 5: YELLOW, 6: YELLOW, 7: YELLOW,
          11: GREEN, 13: GREEN, 14: GREEN, 15: GREEN, 19: GREEN,
          16: GRAY, 17: GRAY, 18: GRAY}
 
-example = ["示例", "上海品凡动力设备有限公司", "货物类", "私企",
-           "鲍龙飞", "50万元",
-           "动力设备，空气压缩机及配件，空气净化设备，气动设备，机电设备，电动工具，五金交电，建材，管道阀门，电子产品销售，机电设备（除特种设备）安装、维修",
-           "021-67606878", "黄勇", "农行上海市航头支行", "农行上海市航头支行",
-           "03483900040014873", "\\", "比价", "空压机采购供应商",
-           "示例", "", "", "取自历史过审实例"]
+example = ["示例", "某某设备有限公司", "货物类", "私企",
+           "张三", "50万元",
+           "（经营范围示例）设备销售、安装、维修",
+           "021-00000000", "李四", "××银行××支行", "××银行××支行",
+           "（银行账号请勿写入示例）", "\\", "比价", "××采购供应商",
+           "示例", "", "", "字段样式示例，全部脱敏"]
 for col, val in enumerate(example, 1):
     c = ws.cell(row=2, column=col, value=val)
     c.font = Font(name="微软雅黑", size=10, color="808080", italic=True)

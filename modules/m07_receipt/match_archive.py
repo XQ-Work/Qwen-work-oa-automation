@@ -4,7 +4,7 @@
 流程：读《付款回单台账》回单记录（收款人/金额/摘要/流水号）
   → 找回单图片(已完成\\{收款人}\\…_{金额}_…)
   → 依次匹配：付款发起台账(收款单位+金额) → 合同发起台账(乙方+金额)
-  → 命中则把回单图复制到 采购项目档案\\{项目编号}-{事项}\\06_付款及验收\\
+  → 命中则把回单图复制到 采购项目档案\\{项目编号}-{事项}\\05_付款及验收\\
   → 命中付款台账行则回写 状态=已付款 + 备注(回单文件)
 匹配不上的留待人工。幂等：已处理过的会计流水号记录在 项目归档记录.json。
 
@@ -24,9 +24,9 @@ sys.path.insert(0, str(BASE / "modules" / "m06_payment"))
 from oa_common import paths  # noqa: E402
 from openpyxl import load_workbook  # noqa: E402
 
-回单目录 = paths.DATA / "转账回单"
+回单目录 = paths.RECEIPT_DIR
 回单台账 = 回单目录 / "付款回单台账.xlsx"
-档案根 = paths.DATA / "OA附件库/文档整理/采购项目档案"
+档案根 = paths.ARCHIVE
 LOG = 回单目录 / "项目归档记录.json"
 
 
@@ -51,6 +51,9 @@ def _proj(合同名称):
 
 
 def load_receipts():
+    if not 回单台账.exists():
+        print("回单台账不存在（尚未扫描过银行回单？）:", 回单台账)
+        return []
     wb = load_workbook(回单台账, data_only=True)
     ws = wb["付款回单台账"]
     out = []
@@ -110,46 +113,55 @@ def lane_b_folders(摘要):
 
 
 def match_ledgers(name, amt):
-    """依次匹配 付款台账→合同台账。收集全部命中，优先取能解析到项目文件夹的行。
-    返回 (来源, 行号, 项目名)。"""
+    """金额链容差匹配：完全相等 > ±1元尾差(自动+备注) > ±5%(仅提示待人工)。
+    候选先付款台账后合同台账，同级优先能解析到项目文件夹的行。
+    返回 (来源, 行号, 项目名, 备注, ±5%候选列表[(来源,行号,项目名,差额)])。"""
     amt_f = _f(amt)
-    cand = []
-    wb = load_workbook(paths.DATA / "付款发起台账.xlsx", data_only=True)
+    if amt_f is None:
+        return (None, 0, "", [], [])
+    cands = []           # (差额, 优先级0付款/1合同, 来源, 行号, 项目名)
+    wb = load_workbook(paths.LEDGER_PAY, data_only=True)
     ws = wb["付款台账"]
     for r in range(2, ws.max_row + 1):
-        if _is_sample(ws, r):
+        if _is_sample(ws, r) or str(ws.cell(r, 4).value or "").strip() != name:
             continue
-        if str(ws.cell(r, 4).value or "").strip() == name and _f(ws.cell(r, 5).value) == amt_f:
-            st = str(ws.cell(r, 11).value or "")
-            if "已付款" in st:
-                continue                      # 该笔已有回单
-            cand.append(("付款台账", r, _proj(ws.cell(r, 2).value)))
+        ra = _f(ws.cell(r, 5).value)
+        if ra is None:
+            continue
+        if "已付款" in str(ws.cell(r, 11).value or ""):
+            continue                         # 该笔已有回单
+        cands.append((round(abs(ra - amt_f), 2), 0, "付款台账", r, _proj(ws.cell(r, 2).value)))
     wb.close()
-    if not cand:
-        wb = load_workbook(paths.DATA / "合同发起台账.xlsx", data_only=True)
+    if not any(c[1] == 0 and c[0] <= 1.0 for c in cands):
+        wb = load_workbook(paths.LEDGER_CONTRACT, data_only=True)
         ws = wb["合同台账"]
         for r in range(2, ws.max_row + 1):
-            if _is_sample(ws, r):
+            if _is_sample(ws, r) or str(ws.cell(r, 6).value or "").strip() != name:
                 continue
-            if str(ws.cell(r, 6).value or "").strip() == name and _f(ws.cell(r, 4).value) == amt_f:
-                cand.append(("合同台账", r, _proj(ws.cell(r, 3).value)))
+            ra = _f(ws.cell(r, 4).value)
+            if ra is None:
+                continue
+            cands.append((round(abs(ra - amt_f), 2), 1, "合同台账", r, _proj(ws.cell(r, 3).value)))
         wb.close()
-    if not cand:
-        return (None, 0, "")
-    # 优先：项目名能找到对应项目文件夹的
-    for src, r, proj in cand:
-        if find_project_dir(proj):
-            return (src, r, proj)
-    return cand[0]
+    near5 = [(src, row, proj, d) for d, _, src, row, proj in cands if 1.0 < d <= max(amt_f * 0.05, 1.01)]
+    auto = [c for c in cands if c[0] <= 1.0]
+    if not auto:
+        return (None, 0, "", [], near5)
+    exact = [c for c in auto if c[0] <= 0.005]
+    pool = exact or auto
+    pool.sort(key=lambda c: (c[0], c[1]))
+    best = next((c for c in pool if find_project_dir(c[4])), pool[0])
+    note = "" if best[0] <= 0.005 else f"尾差{best[0]}元"
+    return (best[2], best[3], best[4], note, near5)
 
 
 def writeback_pay(row, img_name):
-    wb = load_workbook(paths.DATA / "付款发起台账.xlsx")
+    wb = load_workbook(paths.LEDGER_PAY)
     ws = wb["付款台账"]
     ws.cell(row, 11, "已付款")
     note = str(ws.cell(row, 14).value or "").strip()
     ws.cell(row, 14, (note + "；" if note else "") + f"回单:{img_name}")
-    wb.save(paths.DATA / "付款发起台账.xlsx")
+    wb.save(paths.LEDGER_PAY)
 
 
 def main():
@@ -169,12 +181,12 @@ def main():
         if k in log:
             continue
         img = receipt_image(rec["收款人"], rec["金额"])
-        src, row, proj = match_ledgers(rec["收款人"], rec["金额"])
+        src, row, proj, note, near5 = match_ledgers(rec["收款人"], rec["金额"])
         pdir = None
+        line = line0(rec)
         # Lane A：合同/付款台账命中
         if src:
-            line = (f"[{rec['日期']}] {rec['收款人']} {rec['金额']}元 «{rec['摘要']}»"
-                    f" → {src}#{row} 项目名={proj}")
+            line += f" → {src}#{row} 项目名={proj}" + (f" ({note})" if note else "")
             pdir = find_project_dir(proj)
         else:
             # Lane B：<2000 无合同，按摘要里的事项名归项目夹（转账时须写明事项名）
@@ -182,11 +194,15 @@ def main():
             if len(lb) == 1:
                 pdir, proj = lb[0]
                 src, row = "事项审批(摘要)", 0
-                line = (f"[{rec['日期']}] {rec['收款人']} {rec['金额']}元 «{rec['摘要']}»"
-                        f" → LaneB 项目名={proj}")
+                line = line0(rec) + f" → LaneB 项目名={proj}"
             elif len(lb) > 1:
                 n_manual += 1
                 print(line0(rec) + f"  [Lane B歧义]{[p.name for p, _ in lb]}")
+                continue
+            elif near5:
+                n_manual += 1
+                tips = "；".join(f"{s}#{r} {p} 差{d}元" for s, r, p, d in near5[:4])
+                print(line0(rec) + f"  [±5%尾差待人工] {tips}")
                 continue
         if not src or not img:
             n_manual += 1
@@ -196,7 +212,7 @@ def main():
             n_manual += 1
             print(line + "  [未找到项目文件夹]")
             continue
-        dest = pdir / "06_付款及验收" / img.name
+        dest = pdir / "05_付款及验收" / img.name
         print(line + f"  → 归档 {dest.relative_to(paths.DATA)}")
         if not args.dry_run:
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -204,8 +220,17 @@ def main():
                 shutil_copy(img, dest)
             if src == "付款台账":
                 writeback_pay(row, img.name)
+            try:    # 金额链主档：累计已付+差额重算（Lane B 也会补记已付款行）
+                from oa_common import moneyline
+                code, matter = moneyline.code_from_path(pdir.name)
+                if code:
+                    moneyline.mark_paid(code, rec["金额"], rec["收款人"],
+                                        receipt_note=img.name, receipt_src=(rec["摘要"],))
+            except Exception as e:
+                print("  [moneyline] 主档更新失败(不影响归档): " + str(e)[:80])
             log[k] = {"归档": str(dest.relative_to(paths.DATA)),
-                      "匹配": f"{src}#row{row}", "日期": rec["日期"]}
+                      "匹配": f"{src}#row{row}" + (f"({note})" if note else ""),
+                      "日期": rec["日期"]}
             LOG.write_text(json.dumps(log, ensure_ascii=False, indent=1), encoding="utf-8")
         n_ok += 1
     print(f"完成：匹配归档 {n_ok} 条，待人工 {n_manual} 条"

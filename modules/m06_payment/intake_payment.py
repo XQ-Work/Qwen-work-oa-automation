@@ -16,7 +16,7 @@ from oa_common import paths  # noqa: E402
 import parse_invoice as pi  # noqa: E402
 from openpyxl import load_workbook  # noqa: E402
 
-LEDGER = paths.DATA / "付款发起台账.xlsx"
+LEDGER = paths.LEDGER_PAY
 SHEET = "付款台账"
 # 列: 2合同名称 3付款单位 4收款单位 5付款金额 6采购类事项类型
 #     7发票号码 8开票日期 9费用说明 10发票路径 11状态

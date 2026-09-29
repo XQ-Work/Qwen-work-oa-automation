@@ -20,7 +20,7 @@ from oa_common import paths, auth, db  # noqa: E402
 from openpyxl import load_workbook  # noqa: E402
 from playwright.sync_api import sync_playwright  # noqa: E402
 
-LEDGER = paths.DATA / "供应商建档台账.xlsx"
+LEDGER = paths.LEDGER_SUPPLIER
 WORKFLOWID = "444401"
 ADD_PATH = ("/workflow/request/AddRequest.jsp?workflowid=" + WORKFLOWID +
             "&isagent=0&beagenter=0&f_weaver_belongto_userid=")
