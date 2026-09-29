@@ -4,3 +4,6 @@ __pycache__/
 node_modules/
 .DS_Store
 Thumbs.db
+
+# 模板目录里的真实数据文件（供应商银行账号），永不入库
+templates/03_单据类/付款单数据库*
