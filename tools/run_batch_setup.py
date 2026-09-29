@@ -13,7 +13,7 @@ from oa_common import paths  # noqa: E402
 import extract_contract as ex  # noqa: E402
 from openpyxl import load_workbook  # noqa: E402
 
-ARCH = paths.DATA / "OA附件库/文档整理/采购项目档案"
+ARCH = paths.ARCHIVE
 SCENE_MAP = {"货物": "货物-生产物资/设备", "服务": "服务-维修/外包"}
 EXE = BASE / "modules/m05_contract/extract_contract.py"
 PROJECTS = ["2026-003-潜污泵采购", "2026-005-发电机排涝采购",
@@ -41,9 +41,9 @@ for proj in PROJECTS:
         print(f"[{proj}] commit 失败:\n", (r.stdout or '')[-300:] + (r.stderr or '')[-300:])
         continue
     row = int(m.group(2))
-    wb = load_workbook(paths.DATA / "合同发起台账.xlsx")
+    wb = load_workbook(paths.LEDGER_CONTRACT)
     ws = wb["合同台账"]
     ws.cell(row, 2, SCENE_MAP[scene]); ws.cell(row, 8, "2026-09-18")
-    wb.save(paths.DATA / "合同发起台账.xlsx")
+    wb.save(paths.LEDGER_CONTRACT)
     print(f"[{proj}] -> 行{row} 场景={SCENE_MAP[scene]} "
           f"乙方={ws.cell(row,6).value} 金额={ws.cell(row,4).value}")

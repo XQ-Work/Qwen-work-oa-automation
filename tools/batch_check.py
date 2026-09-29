@@ -11,7 +11,7 @@ from oa_common import paths  # noqa: E402
 import extract_contract as ex  # noqa: E402
 import fill_contract as fc  # noqa: E402
 
-ARCH = paths.DATA / "OA附件库/文档整理/采购项目档案"
+ARCH = paths.ARCHIVE
 PROJECTS = [
     "2026-002-滤布采购", "2026-003-潜污泵采购", "2026-004-污水池堵漏",
     "2026-005-发电机排涝采购", "2026-007-细格栅维修", "2026-008-维修用品采购",

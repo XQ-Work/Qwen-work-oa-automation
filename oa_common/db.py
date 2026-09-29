@@ -6,7 +6,7 @@ import sqlite3
 
 from oa_common import paths
 
-DB_PATH = paths.DATA / "oa_automation.db"
+DB_PATH = paths.DB
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS matter(
