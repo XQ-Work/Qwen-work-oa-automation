@@ -1,0 +1,12 @@
+# 单据类一键自动化 —— 运行依赖
+# 安装：python -m pip install -r requirements.txt
+# 注意：请固定用同一个解释器运行脚本（本项目在
+#   C:\Users\XQ\AppData\Local\Programs\Python\Python314\python.exe 下已配齐）
+lxml
+xlrd
+xlutils
+xlwt
+pdfplumber
+pywin32
+pandas
+openpyxl

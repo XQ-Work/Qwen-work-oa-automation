@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>单据类一键自动化 · 使用手册</title>
+<style>
+  :root{
+    --ink:#1a2332; --sub:#5b6b7f; --line:#e3e9f0; --bg:#f5f7fa;
+    --brand:#0f6b4f; --brand2:#e8f5f0; --warn:#b8860b; --warnbg:#fdf6e3;
+    --danger:#b3402e; --code:#f0f3f7;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:"Microsoft YaHei","PingFang SC","Segoe UI",sans-serif;color:var(--ink);background:var(--bg);line-height:1.75;font-size:15px}
+  .wrap{max-width:960px;margin:0 auto;padding:32px 20px 80px}
+  header{background:linear-gradient(135deg,#0f6b4f,#14507a);color:#fff;border-radius:14px;padding:36px 40px;margin-bottom:28px}
+  header h1{font-size:26px;letter-spacing:1px}
+  header p{opacity:.85;margin-top:8px}
+  header .meta{font-size:12px;opacity:.65;margin-top:14px}
+  nav{background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px 18px;margin-bottom:24px;font-size:13.5px}
+  nav a{color:var(--brand);text-decoration:none;margin-right:14px;white-space:nowrap;display:inline-block;margin-bottom:2px}
+  section{background:#fff;border:1px solid var(--line);border-radius:12px;padding:26px 30px;margin-bottom:22px}
+  h2{font-size:19px;color:var(--brand);border-left:4px solid var(--brand);padding-left:10px;margin-bottom:14px}
+  h3{font-size:15.5px;margin:18px 0 8px;color:var(--ink)}
+  p{margin:8px 0}
+  table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13.5px}
+  th{background:var(--brand2);color:var(--ink);text-align:left;padding:8px 10px;border:1px solid var(--line);white-space:nowrap}
+  td{padding:8px 10px;border:1px solid var(--line);vertical-align:top}
+  tr:nth-child(even) td{background:#fafbfc}
+  code,pre{font-family:Consolas,"Courier New",monospace;font-size:13px}
+  code{background:var(--code);padding:1px 6px;border-radius:4px}
+  pre{background:#1e2733;color:#d8e2ee;padding:14px 16px;border-radius:8px;overflow-x:auto;margin:10px 0;line-height:1.6}
+  pre code{background:none;padding:0;color:inherit}
+  .tip,.warn,.danger{border-radius:8px;padding:12px 16px;margin:12px 0;font-size:13.5px}
+  .tip{background:var(--brand2);border-left:4px solid var(--brand)}
+  .warn{background:var(--warnbg);border-left:4px solid var(--warn)}
+  .danger{background:#fbeae6;border-left:4px solid var(--danger)}
+  .flow{display:flex;flex-wrap:wrap;gap:8px;align-items:stretch;margin:14px 0}
+  .node{flex:1 1 130px;min-width:130px;background:var(--brand2);border:1px solid #cbe6dc;border-radius:8px;padding:10px 8px;text-align:center;font-size:12.5px;line-height:1.5}
+  .node b{display:block;color:var(--brand);font-size:13px;margin-bottom:2px}
+  .arrow{align-self:center;color:#9db3a8;font-size:18px;flex:0 0 auto}
+  .path{color:#2b6cb0;font-family:Consolas,monospace;font-size:12.5px}
+  footer{text-align:center;color:var(--sub);font-size:12.5px;margin-top:30px}
+  ul,ol{padding-left:22px}
+  li{margin:4px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>单据类一键自动化 · 使用手册</h1>
+  <p>入库单扫描件 → 采购台账 / 验收单 / 付款单，一条命令全部生成</p>
+  <div class="meta">版本：2026-09-06 ｜ 适用环境：Windows + Python 3 + Word/Excel 桌面组件 ｜ 项目根目录：D:\千问工作区\自动化（单据类）</div>
+</header>
+
+<nav>
+  <a href="#s1">① 快速上手</a>
+  <a href="#s2">② 处理流程</a>
+  <a href="#s3">③ 目录结构</a>
+  <a href="#s4">④ 工具清单</a>
+  <a href="#s5">⑤ 数据维护</a>
+  <a href="#s6">⑥ 常见问题</a>
+  <a href="#s7">⑦ 更新记录</a>
+</nav>
+
+<!-- ==================== 快速上手 ==================== -->
+<section id="s1">
+  <h2>① 快速上手</h2>
+  <h3>日常三步</h3>
+  <ol>
+    <li>把待处理文件<b>直接丢进 <span class="path">10_输入</span> 根目录</b>——入库单扫描件（jpg/png）、发票、申购单、事项审批混放都行，程序启动时会自动分拣归位（识别不了的进 <span class="path">10_输入\待确认</span> 并提示，不会丢文件）。当然，习惯手动放子目录也完全可以，程序不会动它们</li>
+    <li>双击根目录的 <b>一键生成.bat</b>（或在命令行运行 <code>python run.py</code>）</li>
+    <li>到 <span class="path">30_待打印</span> 取 PDF、<span class="path">20_输出</span> 取台账和 Word 成品</li>
+  </ol>
+  <div class="tip"><b>成品位置约定</b>：台账 → <span class="path">20_输出\台账</span>；验收单 Word → <span class="path">20_输出\验收单</span>；<b>打印用 PDF → <span class="path">30_待打印</span></b>（2026-09-06 起统一此口径）；付款单 → <span class="path">20_输出\付款单</span>；处理完的原件自动归档到 <span class="path">40_归档</span>。</div>
+  <h3>新机器部署</h3>
+  <pre><code>python -m pip install -r requirements.txt   # 装依赖
+python -c "import paths; paths.ensure_dirs()" # 建目录骨架
+python init_db.py                             # 建空库（有历史JSON才导入）</code></pre>
+  <p>再把 4 个模板放入 <span class="path">50_模板</span>（采购物资台帐.xls / 验收单模板.docx / 付款单模板.xlsx / 付款单数据库.xlsx，模板含公司表单样式，不随代码仓库分发）。</p>
+</section>
+
+<!-- ==================== 流程 ==================== -->
+<section id="s2">
+  <h2>② 处理流程</h2>
+  <div class="flow">
+    <div class="node"><b>步骤0</b>自动分拣<br>10_输入 散放文件<br>按名称→类型→PDF内容<br>归位，判不了进待确认</div><div class="arrow">→</div>
+    <div class="node"><b>步骤1</b>扫描件 OCR<br>（内置中文引擎<br>+人工校对缓存优先）</div><div class="arrow">→</div>
+    <div class="node"><b>步骤2</b>单号匹配数据库<br>缺单号自动补录<br>金额交叉验证</div><div class="arrow">→</div>
+    <div class="node"><b>步骤3</b>原件归档<br><span class="path">40_归档</span><br>按规范重命名</div><div class="arrow">→</div>
+    <div class="node"><b>步骤4</b>采购台账<br>按单据日期归入<br>各月份工作表</div>
+  </div>
+  <p style="font-size:13px;color:#5b6b7f">分拣判定顺序：文件名关键词（入库单/发票/申购单/审批）→ 图片扩展名归扫描件 → PDF 读首页文本（价税合计/销售方→发票，申购→申购单，审批→事项审批）→ 都判不了进 <span class="path">10_输入\待确认</span>。同名文件内容相同自动去重，不同内容加序号避让。</p>
+  <div class="flow">
+    <div class="node"><b>步骤5-7</b>验收单 Word<br>+ 转 PDF<br>→ <span class="path">30_待打印</span></div><div class="arrow">→</div>
+    <div class="node"><b>步骤7.5</b>发票PDF提取<br>供应商/金额/用途<br>写入数据库</div><div class="arrow">→</div>
+    <div class="node"><b>步骤8-14</b>付款单 xlsx+PDF<br>匹配供应商账户<br>→ <span class="path">30_待打印</span></div><div class="arrow">→</div>
+    <div class="node"><b>收尾</b>发票PDF移入<br><span class="path">20_输出\发票</span><br>付款台账追加</div>
+  </div>
+  <h3>内置的安全校验</h3>
+  <ul>
+    <li><b>交叉验证</b>：每行「数量 × 单价 = 金额」、各行合计 = 单据合计，不一致只打 WARNING，<b>绝不自动改数</b>；</li>
+    <li><b>台账自检（步骤4.5）</b>：台账与数据库逐单号比对行数与金额，整单缺失自动补入，补不了才提示人工；</li>
+    <li><b>用途不一致熔断</b>：同一金额的申购单与事项审批用途冲突时，放弃自动采用并在结尾集中列出，等人工核对；</li>
+    <li><b>幂等防重</b>：已入账单号、已处理发票会自动跳过，重复运行不产生重复记录。</li>
+  </ul>
+</section>
+
+<!-- ==================== 目录 ==================== -->
+<section id="s3">
+  <h2>③ 目录结构</h2>
+  <table>
+    <tr><th>目录</th><th>用途</th><th>谁来动它</th></tr>
+    <tr><td class="path">10_输入</td><td>待处理单据。<b>散放在本层即可</b>，程序自动分拣到 入库单扫描件 / 发票 / 申购单 / 事项审批 子目录；判不了的进 <span class="path">10_输入\待确认</span></td><td>人工丢入，脚本分拣</td></tr>
+    <tr><td class="path">20_输出</td><td>成品：台账 / 验收单(Word) / 付款单 / 发票归档副本</td><td>脚本生成</td></tr>
+    <tr><td class="path">30_待打印</td><td>所有打印用 PDF（验收单、付款单）</td><td>脚本生成 → 打印</td></tr>
+    <tr><td class="path">40_归档</td><td>处理完的原件（按类型分层，统一命名）</td><td>脚本移动，人工只读</td></tr>
+    <tr><td class="path">50_模板</td><td>4 个业务模板，<b>只读</b></td><td>人工维护</td></tr>
+    <tr><td class="path">60_数据</td><td>SQLite 数据库 单据.db（入库单/发票/元数据）</td><td>脚本读写</td></tr>
+    <tr><td class="path">70_日志</td><td>运行报告（用 run_report.py 时生成）</td></tr>
+    <tr><td class="path">80_工具</td><td>本地 OCR、查库补录、成品重建、转 PDF 等工具</td></tr>
+    <tr><td class="path">90_临时</td><td>OCR 校对缓存等中间产物，可随时清空重建</td></tr>
+  </table>
+</section>
+
+<!-- ==================== 工具 ==================== -->
+<section id="s4">
+  <h2>④ 工具清单</h2>
+  <table>
+    <tr><th>工具</th><th>作用</th><th>什么时候用</th></tr>
+    <tr><td><b>一键生成.bat</b> / <code>run.py</code></td><td>主流程入口，自动选择装好依赖的 Python（本机有两个解释器，别直接敲 python）</td><td>日常跑批</td></tr>
+    <tr><td class="path">80_工具\ocr_local.ps1</td><td>本地 OCR（Windows 内置中文引擎）；同名 <code>&lt;图片MD5&gt;.txt</code> 缓存在 <span class="path">90_临时\ocr_cache</span> 时优先读缓存</td><td>被主流程调用</td></tr>
+    <tr><td class="path">80_工具\manage_db.py</td><td>查库 / 补录 / 改用途：<code>list</code>、<code>show 单号</code>、<code>add 单号</code>（交互）、<code>usage</code>、<code>total</code></td><td>OCR 识别不清、需要人工补录时</td></tr>
+    <tr><td class="path">80_工具\rebuild_outputs.py</td><td>以数据库为唯一数据源，重建台账 + 全部验收单 docx</td><td>成品损坏或与库不符时</td></tr>
+    <tr><td class="path">80_工具\to_pdf.py</td><td>验收单 docx → PDF（输出到 30_待打印），跳过已是最新的</td><td>主流程 PDF 环节被跳过时补转</td></tr>
+    <tr><td class="path">80_工具\build_ocr_cache.py</td><td>把人工核对过的单据数据批量写成 OCR 缓存</td><td>重新处理一批识别质量差的扫描件</td></tr>
+    <tr><td class="path">80_工具\seed_db.py</td><td>把核对过的单据数据（10 单）灌入数据库（幂等）</td><td>重建数据库后恢复种子数据</td></tr>
+    <tr><td class="path">80_工具\run_report.py</td><td>包裹主流程，把完整输出+成功/跳过/WARNING 汇总写成 <span class="path">70_日志\运行报告_*.log</span></td><td>需要留档、排查问题时</td></tr>
+    <tr><td class="path">80_工具\archive_outputs.py</td><td>把 20_输出 的历史成品按类型/日期归档进 40_归档</td><td>季度清理时</td></tr>
+    <tr><td><code>init_db.py</code></td><td>建库建表（有历史 JSON 才导入）；<b>库非空且无 JSON 时默认拒绝执行</b>，防误删，确认加 <code>--force</code></td><td>新机器部署</td></tr>
+  </table>
+</section>
+
+<!-- ==================== 数据维护 ==================== -->
+<section id="s5">
+  <h2>⑤ 数据维护与安全</h2>
+  <h3>备份三件套</h3>
+  <ul>
+    <li><b>数据库</b>：<span class="path">60_数据\单据.db</span> 单文件，定期复制一份即为备份；</li>
+    <li><b>原件</b>：<span class="path">40_归档</span> 里的扫描件/发票是不可再生的凭证，删项目前务必单独备份；</li>
+    <li><b>模板</b>：<span class="path">50_模板</span> 含公司表单样式，建议纳入网盘/版本库。</li>
+  </ul>
+  <h3>手工补录一张入库单</h3>
+  <pre><code>python 80_工具\manage_db.py add CGSH单号        # 交互式逐项录入（单号形如 CGSH + 12位数字）
+python run.py                                            # 补录后重跑，台账/验收单自动补齐</code></pre>
+  <h3>修正识别错误</h3>
+  <p>OCR 结果缓存在 <span class="path">90_临时\ocr_cache\&lt;图片MD5&gt;.txt</span>，格式为「一行一个字段」。图清晰但识别错时：先删对应缓存让引擎重跑，或对照原图手工改缓存文件（<b>严禁凭记忆改数字</b>），再运行 <code>rebuild_outputs.py</code> 重建成品。</p>
+</section>
+
+<!-- ==================== FAQ ==================== -->
+<section id="s6">
+  <h2>⑥ 常见问题</h2>
+  <h3>Q1：双击 bat 报 ModuleNotFoundError？</h3>
+  <p>本机的 <code>python</code> 命令可能解析到没装依赖的内置运行时。<b>始终用 <code>python run.py</code> 或 <code>一键生成.bat</code></b> 启动，它会自动探测并切到装齐依赖的解释器。</p>
+  <h3>Q2：验收单没有 PDF？</h3>
+  <p>若跑批时设过 <code>SKIP_PDF=1</code> 或 Word 组件被占用，docx 已生成但 PDF 被跳过。关闭所有 Word 窗口后运行 <code>python 80_工具\to_pdf.py</code> 补转，PDF 统一落在 <span class="path">30_待打印</span>。</p>
+  <h3>Q3：台账金额和发票对不上？</h3>
+  <p>先看运行输出里的 WARNING（交叉验证/台账自检都会点名单号）；再用 <code>manage_db.py show 单号</code> 核数据库；最后对照 <span class="path">40_归档</span> 原图人工确认。<b>以票面原图为准</b>，改库后 <code>rebuild_outputs.py</code> 重建。</p>
+  <h3>Q4：重复运行会不会把台账写重？</h3>
+  <p>不会。台账按入库单号去重（已有单号跳过），发票按 processed 标记去重，扫描件处理完即移出输入目录。</p>
+  <h3>Q5：项目目录搬家了要改代码吗？</h3>
+  <p>不用。<code>paths.py</code> 按自身位置自动定位根目录；若想「代码和数据分开放」，设置环境变量 <code>DJ_BASE</code> 指向数据根目录即可。</p>
+  <h3>Q6：误删了文件怎么办？</h3>
+  <p>本手册的清理操作一律走 <b>回收站</b>（右键 → 还原即可）；脚本运行只移动、重命名文件，不删除原件——处理完的原件都在 <span class="path">40_归档</span>。</p>
+</section>
+
+<!-- ==================== 更新记录 ==================== -->
+<section id="s7">
+  <h2>⑦ 更新记录</h2>
+  <h3>2026-09-06</h3>
+  <ul>
+    <li><b>修复</b>：台账跨月单据全部错写入首条记录月份的页面 → 现按每张单据自身日期归入对应月份页；</li>
+    <li><b>补漏</b>：为此前漏出单的 1 张入库单补生成验收单；验收单填写口径经确认保持模板原样（不写入库单号/供货单位表头行）；</li>
+    <li><b>统一口径</b>：打印用 PDF 一律输出 <span class="path">30_待打印</span>，<span class="path">20_输出\验收单</span> 仅存 Word；</li>
+    <li><b>加固</b>：<code>init_db.py</code> 库非空且无历史 JSON 时默认拒绝重建（--force 显式放行）；根路径改为自适应定位；</li>
+    <li><b>新增</b>：<code>requirements.txt</code>（补记 pandas、openpyxl）、<code>run.py</code>/<code>一键生成.bat</code> 双入口、<code>rebuild_outputs.py</code> 成品重建工具；</li>
+    <li><b>清理</b>：移除 9 个未接入主流程的遗留脚本（批量打印 A~E、auto_acceptance、gen_2024、PDF合并归档）与空占位文件——需要时从仓库恢复；</li>
+    <li><b>数据</b>：首批 11 单 / 43 项完成端到端验证，台账、验收单与数据库三方核对一致。</li>
+  </ul>
+  <h3>更早</h3>
+  <ul>
+    <li>2026-09-05 本地化部署：Windows 内置中文 OCR 接入、10 档目录骨架、SQLite 建库；</li>
+    <li>2026-09-02 v4 重构：JSON → SQLite、发票用途移出文件名、统一中文命名规范。</li>
+  </ul>
+</section>
+
+<footer>单据类一键自动化 v4 ｜ 手册生成于 2026-09-06 ｜ 单文件版，无外部依赖，可离线查看</footer>
+</div>
+</body>
+</html>
