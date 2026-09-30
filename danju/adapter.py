@@ -63,12 +63,17 @@ def _rows(sql, args=()):
     path = db_path()
     if not os.path.exists(path):
         return []
-    conn = sqlite3.connect("file:%s?mode=ro" % path.replace("\\", "/"), uri=True)
-    conn.row_factory = sqlite3.Row
     try:
+        conn = sqlite3.connect("file:%s?mode=ro" % path.replace("\\", "/"), uri=True)
+        conn.row_factory = sqlite3.Row
         return [dict(r) for r in conn.execute(sql, args).fetchall()]
+    except sqlite3.OperationalError:
+        return []          # 空库/未初始化：无表即视为零记录
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def _inout_counts():
