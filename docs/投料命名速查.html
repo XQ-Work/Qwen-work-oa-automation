@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>投料命名速查</title>
+<style>
+  :root { --blue:#2f5aa8; --green:#2e7d32; --red:#c62828; --amber:#b45309;
+          --line:#e3e8f0; --bg:#f6f8fb; --card:#ffffff; }
+  * { box-sizing:border-box; }
+  body { font-family:"Microsoft YaHei","PingFang SC",sans-serif; margin:0;
+         background:var(--bg); color:#233044; line-height:1.65; }
+  header { background:var(--blue); color:#fff; padding:18px 28px; }
+  header h1 { margin:0; font-size:22px; }
+  header p  { margin:4px 0 0; opacity:.85; font-size:13px; }
+  main { max-width:980px; margin:18px auto 60px; padding:0 16px; }
+  section { background:var(--card); border:1px solid var(--line); border-radius:10px;
+            padding:14px 18px; margin-bottom:14px; }
+  h2 { font-size:16px; margin:2px 0 10px; color:var(--blue); }
+  .fmt { font-size:17px; font-weight:700; background:#eef3fb; border-radius:8px;
+         padding:10px 14px; }
+  .fmt code { color:var(--blue); }
+  table { border-collapse:collapse; width:100%; font-size:14px; }
+  th, td { border:1px solid var(--line); padding:6px 10px; text-align:left; vertical-align:top; }
+  th { background:#eef3fb; font-weight:600; }
+  td.num { text-align:center; white-space:nowrap; }
+  .ok  { color:var(--green); font-weight:600; }
+  .no  { color:var(--red); font-weight:600; }
+  .gray{ color:#8a94a6; }
+  .name { white-space:nowrap; font-weight:600; }
+  .copy { cursor:pointer; border:1px solid #c9d8f0; border-radius:6px; background:#f4f8ff;
+          font-size:12px; padding:1px 8px; margin-left:8px; user-select:none; color:var(--blue); }
+  .copy:active { transform:scale(.96); }
+  .flow { display:flex; flex-wrap:wrap; gap:8px 20px; font-size:14px; }
+  .flow b { color:var(--blue); }
+  .free li, ul.tight li { margin-bottom:3px; }
+  .bad { border-left:4px solid var(--red); background:#fdf3f3; padding:8px 12px; border-radius:6px; }
+  .good { border-left:4px solid var(--green); background:#f2faf2; padding:8px 12px; border-radius:6px; }
+  .tip { font-size:12.5px; color:#67728a; margin-top:6px; }
+  .toast { position:fixed; bottom:30px; left:50%; transform:translateX(-50%); background:#333;
+           color:#fff; padding:8px 18px; border-radius:20px; font-size:14px; opacity:0;
+           transition:opacity .25s; pointer-events:none; }
+  @media print {
+    body { background:#fff; } section { border:none; page-break-inside:avoid; }
+    .copy, .toast { display:none; } header { background:#fff; color:var(--blue); padding:6px 0; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>投料命名速查</h1>
+  <p>材料丢进「输入/」就一个规则：<b>材料名（事项名）.pdf</b>。点虚线框可复制示例。</p>
+</header>
+<main>
+
+<section>
+  <h2>一、总格式</h2>
+  <div class="fmt">材料名<span>(事项名)</span>.pdf
+    <span class="copy" data-c="采购合同（潜污泵采购）.pdf">复制示例</span></div>
+  <ul class="tight">
+    <li><b>事项名</b> = 项目文件夹「2026-NNN-」后面的那几个字，如 <b>潜污泵采购</b> → 事项名 <b>潜污泵采购</b></li>
+    <li>可带金额（系统用它自动分流 2000 上下两条道）：<br>
+        <code>申购单（潜污泵采购-金额：1500）.pdf</code>
+        <span class="copy" data-c="申购单（潜污泵采购-金额：1500）.pdf">复制</span></li>
+    <li>全角半角括号都认；多份同材料在事项名后加说明字：<br>
+        <code>事项审批（发电机排涝）.pdf</code> + <code>事项审批（发电机排涝）排涝物资.pdf</code> → 全部一起上传
+        <span class="copy" data-c="事项审批（发电机排涝）.pdf">复制</span></li>
+    <li>新事项第一刀永远投<b>申购单</b>；没在台账里的事项会自动建夹、自动编号</li>
+  </ul>
+</section>
+
+<section>
+  <h2>二、每条流程要传哪些材料（必传 = 少一件就中断报错）</h2>
+  <table>
+    <tr><th style="width:23%">流程</th><th>要交的文件（全用总格式，事项名代入即可）</th><th style="width:9%">必传</th><th style="width:13%">归档夹</th></tr>
+    <tr>
+      <td class="name">070801 事项审批<br><span class="gray">立项（金额&gt;2000走合同，&lt;2000免合同）</span></td>
+      <td><code>申购单（事项名）</code></td><td class="num ok">1 件</td><td class="num">01</td>
+    </tr>
+    <tr>
+      <td class="name">444401 供应商新增<br><span class="gray">首次合作的供应商</span></td>
+      <td><code>营业执照（供应商全称）</code>、<code>法人身份证（供应商全称）</code>、<code>企业信用信息公示（供应商全称）</code></td>
+      <td class="num gray">材料另议</td><td class="num">供应商档案</td>
+    </tr>
+    <tr>
+      <td class="name">070302 合同会签<br><span class="gray">与中标方签约</span></td>
+      <td><code>事项审批（事项名）</code>批复件、<code>比质比价报告单（事项名）</code>、<code>供应商报价单及资质（事项名）</code>、<code>采购合同（事项名）</code><b class="no">未盖章原件即可</b></td>
+      <td class="num ok">4 件</td><td class="num">01 / 03 / 02 / 04</td>
+    </tr>
+    <tr>
+      <td class="name">071501 付款申请<br><span class="gray">货到票到要付钱</span></td>
+      <td><code>流程会签（事项名）</code>、<code>采购合同（事项名 已用印）</code>、<code>发票（事项名）</code>、<code>付款单（事项名）</code><span class="gray">（系统自动出）</span>；小额免合同可只交 <b>3 件</b></td>
+      <td class="num ok">4 件</td><td class="num">05</td>
+    </tr>
+  </table>
+  <p class="tip">已用印版<b>不是</b>合同会签必传项，它是付款侧才要的东西。</p>
+</section>
+
+<section>
+  <h2>三、这些不用改名，直接丢进「输入/」</h2>
+  <ul class="free">
+    <li>电子发票：<code>dzfp_2642200000…</code> → 自动识别分流</li>
+    <li>银行回单：文件名含 <b>回单 / 交易流水 / 银行流水</b> → 自动进回单扫描线</li>
+    <li>入库单：<b>入库单扫描件_</b> 开头 → 单据线自动分拣归位</li>
+  </ul>
+</section>
+
+<section>
+  <h2>四、日常三句话</h2>
+  <div class="flow">
+    <span><b>收料：</b>把材料丢进 输入/，说一句“收料”（= <code>intake_all.py run</code>）</span>
+    <span><b>发草稿：</b>攒几单后说一句“发草稿”（= <code>flush</code>，永远只到草稿，提交人工）</span>
+    <span><b>看进度：</b>打开根目录 <code>进度总览.xlsx</code>（一行一事项，缺的附件标红点名）</span>
+  </div>
+  <ul class="tight">
+    <li>命名不规范的 → 进 <b>工作/复核/收件异常</b>，改名后重投</li>
+    <li>办结了 → 跟助理说“归档 2026-XXX”（自动分 日常采购 / 采购合同）</li>
+    <li>回单到账 → 直接丢输入/，自动匹配归到项目 05 夹</li>
+  </ul>
+</section>
+
+<section>
+  <h2>五、正反例对照</h2>
+  <div class="bad">✗ 合同.pdf　｜　✗ 合同(事项名).docx　｜　✗ 采购合同（2026-005-发电机排涝采购）.pdf<br>
+  <span class="gray">原因：缺事项名 / 用了材料旧格式 / 事项名写成完整文件夹名（去掉编号前缀）</span></div>
+  <div class="good" style="margin-top:8px">✓ 采购合同（发电机排涝采购）.pdf　　✓ 申购单（空压机采购-金额：8200）.pdf</div>
+</section>
+
+<section>
+  <h2>六、常见疑问</h2>
+  <ul class="tight">
+    <li><b>同一个材料要传两个流程怎么办？</b>不用复制，交一次放对位置即可（如采购合同=会签原件+付款侧另给已用印版）。</li>
+    <li><b>发票要不要改名？</b>要：给 OA 挂附件的 <code>发票（事项名）.pdf</code>；纯电子记账可丢 dzfp 原件。</li>
+    <li><b>事项名不知道填什么？</b>打开 <code>进度总览.xlsx</code> 看事项列，照抄；或问助理。</li>
+    <li><b>新事项还没有编号？</b>第一刀投 <code>申购单（事项名）</code>，系统建夹自动编号。</li>
+    <li><b>批量来料？</b>一次性全丢输入/，说一句“收料”即可。</li>
+  </ul>
+</section>
+
+</main>
+<div class="toast" id="t">已复制</div>
+<script>
+  document.querySelectorAll('.copy').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var t = b.getAttribute('data-c');
+      function ok() { var e = document.getElementById('t'); e.style.opacity = 1;
+                      setTimeout(function(){ e.style.opacity = 0; }, 900); }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(t).then(ok, fallback);
+      } else fallback();
+      function fallback() {
+        var ta = document.createElement('textarea'); ta.value = t;
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); ok(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  });
+</script>
+</body>
+</html>
