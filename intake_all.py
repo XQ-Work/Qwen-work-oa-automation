@@ -206,7 +206,9 @@ def chain_m02(item, dst):
 # ---------------- 顶层命令 ----------------
 
 def _index(path, material="", proj=None):
-    """投料即建档：正文入全文索引+错投检测（第一阶段仅文字抽取，失败不拦收料）。"""
+    """投料即建档：正文入全文索引+错投检测（失败不拦收料）；selftest 沙箱不触真索引。"""
+    if _SELFTEST:
+        return
     try:
         from oa_common import docindex
         code = matter = ""
@@ -222,7 +224,12 @@ def _index(path, material="", proj=None):
         print(f"    [索引] 失败(不影响收料): {str(e)[:80]}")
 
 
+_SELFTEST = False
+
+
 def cmd_scan(inbox, live=False, ledger_mode="real"):
+    global _SELFTEST
+    _SELFTEST = (ledger_mode == "copy")
     queue = load_json(QUEUE_F, [])
     done = load_json(DONE_F, {})
     moved, bad = 0, 0
