@@ -38,9 +38,9 @@ LEDGER_CONTRACT = paths.LEDGER_CONTRACT
 LEDGER_PAY = paths.LEDGER_PAY
 
 # 材料名(别名) -> (规范名, 归档阶段子夹, 后续动作)
-# 动作: archive=纯归档 | m01/m05/m06=解析+排队发草稿 | m07=转回单夹 | danju=转单据类
+# 动作: archive=纯归档 | m02/m05/m06=解析+排队发草稿 | m07=转回单夹 | danju=转单据类
 ROUTES = [
-    (["申购单", "请购单"],              "申购单",       "01_事项审批",     "m01"),
+    (["申购单", "请购单"],              "申购单",       "01_事项审批",     "m02"),
     (["事项审批"],                      "事项审批",     "01_事项审批",     "archive"),
     (["比质比价报告", "比质比价报告单", "比价报告"], "比质比价报告", "03_比质比价报告单", "archive"),
     (["报价单及资质", "报价单", "供应商资质"],       "报价单及资质", "02_供应商报价及资质", "archive"),
@@ -189,9 +189,9 @@ def chain_m06(item, dst):
     return item
 
 
-def chain_m01(item, dst):
+def chain_m02(item, dst):
     item["status"] = "needs_agent"   # 申购单要素需视觉识别：intake.py scan -> add -> fill_oa
-    item["extract_log"] = "待智能体：python modules/m01_shxiang/intake.py scan"
+    item["extract_log"] = "待智能体：python modules/m02_shxiang/intake.py scan"
     try:                             # 文件名带金额则预估金额入主档（金额链起点）
         from oa_common import moneyline
         code, matter = moneyline.code_from_path(dst)
@@ -294,11 +294,11 @@ def cmd_scan(inbox, live=False, ledger_mode="real"):
             continue
         item = dict(id=h[:12], ts=now(), type=act, matter=matter, file=str(dst),
                     amount=amt, row=None, status="queued", attempts=0, last_err="")
-        if act in ("m05", "m06", "m01"):
+        if act in ("m05", "m06", "m02"):
             if ledger_mode == "copy":       # 自测模式：不动正式台账
                 item["extract_log"] = "(自测跳过解析)"
             else:
-                item = {"m05": chain_m05, "m06": chain_m06, "m01": chain_m01}[act](item, dst)
+                item = {"m05": chain_m05, "m06": chain_m06, "m02": chain_m02}[act](item, dst)
         queue.append(item)
         save_json(DONE_F, done)
         save_json(QUEUE_F, queue)

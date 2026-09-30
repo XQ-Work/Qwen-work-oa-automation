@@ -50,7 +50,7 @@ HEAD = ["编号", "事项", "类别", "合同金额", "供应商（全称）", "
         "下一步该干嘛", "灯"]
 # 附件列：(匹配材料词, 排除词, 激活条件键)
 ATTACH = [
-    ("申购单", None, "m01"), ("事项审批", None, "m05"),
+    ("申购单", None, "m02"), ("事项审批", None, "m05"),
     ("比质比价报告单|报告单", None, "m05"), ("供应商报价单及资质|报价单", None, "m05"),
     ("采购合同", "已用印|盖章", "m05"),
     ("流程会签", None, "m06"), ("采购合同", "已用印|盖章|invert", "m06"),
@@ -85,7 +85,7 @@ def load_data():
             if d.is_dir() and re.match(r"^\d{4}-\d{3}-", d.name):
                 code, matter = moneyline.code_from_path(d.name)
                 projs[code] = dict(code=code, matter=matter, dir=d, files={},
-                                   m01=[], m05=[], m06=[], archived=archived)
+                                   m02=[], m05=[], m06=[], archived=archived)
                 for sub in d.rglob("*"):
                     if sub.is_file():
                         projs[code]["files"].setdefault(sub.parent.name[:2], []).append(sub)
@@ -106,7 +106,7 @@ def load_data():
                     else:
                         continue
                     break
-    link(_rows(paths.LEDGER_OA, "发起台账"), "m01", 17, [2, 5])
+    link(_rows(paths.LEDGER_OA, "发起台账"), "m02", 17, [2, 5])
     link(_rows(paths.LEDGER_CONTRACT, "合同台账"), "m05", 15, [3, 7])
     link(_rows(paths.LEDGER_PAY, "付款台账"), "m06", 15, [2])
     q = {}
@@ -159,15 +159,15 @@ def build():
     order = sorted(projs.values(), key=lambda p: (p.get("archived"), p["code"]))
     for p in order:
         files = p["files"]
-        st01 = flow_state(p["m01"], 12)
+        st01 = flow_state(p["m02"], 12)
         st05 = flow_state(p["m05"], 10)
         st06 = flow_state(p["m06"], 10)
-        lane_b = bool(p["m01"]) and not p["m05"] and _amount(p) < 2000
-        active = {"m01": bool(p["m01"]),
+        lane_b = bool(p["m02"]) and not p["m05"] and _amount(p) < 2000
+        active = {"m02": bool(p["m02"]),
                   "m05": (not lane_b) and p["m05"] and st05 != S1,
                   "m06": p["m06"] and st06 != S1,
                   "m07": any("已付款" in str(x[10]) for x in p["m06"])}
-        dirs = {"m01": ("01", "04"), "m05": ("01", "02", "03", "04"),
+        dirs = {"m02": ("01", "04"), "m05": ("01", "02", "03", "04"),
                 "m06": ("05",), "m07": ("05",)}
         cells = []
         pay_started = bool(p["m06"])
@@ -199,14 +199,14 @@ def build():
         qk = queue.get(p["matter"], [])
         if flags or any(i["status"] == "failed" for i in qk):
             lamp, nxt = "红", "；".join(flags + ["有草稿发送失败，人工核对后重试 flush"])
-        elif miss or qk or st01 == S1 or (st05 == S1 and not lane_b and p["m01"]):
+        elif miss or qk or st01 == S1 or (st05 == S1 and not lane_b and p["m02"]):
             lamp = "黄"
             parts = []
             if qk:
                 parts.append("跑 flush 发草稿")
             if miss:
                 parts.append("补投：" + "、".join(miss) + "（事项名）投 输入/")
-            if st01 == S1 and p["m01"]:
+            if st01 == S1 and p["m02"]:
                 parts.append("事项审批台账待确认/待发")
             nxt = "；".join(parts)
         else:
@@ -256,7 +256,7 @@ def _amount(p):
             return float(str(x[3]).replace(",", ""))
         except (ValueError, IndexError):
             pass
-    for x in reversed(p["m01"]):
+    for x in reversed(p["m02"]):
         try:
             return float(str(x[3]).replace(",", ""))
         except (ValueError, IndexError):
@@ -275,7 +275,7 @@ def _supplier(p):
 
 
 def _cat(p):
-    for x in p["m01"]:
+    for x in p["m02"]:
         t = str(x[2])
         return "货物" if "货物" in t else ("服务" if "服务" in t else "")
     return ""
@@ -293,7 +293,7 @@ def _lastdate(p):
     for d in p["files"].values():
         for f in d:
             ds.append(dt.datetime.fromtimestamp(f.stat().st_mtime).strftime("%Y-%m-%d"))
-    for rows, col in ((p["m01"], 14), (p["m05"], 12), (p["m06"], 12)):
+    for rows, col in ((p["m02"], 14), (p["m05"], 12), (p["m06"], 12)):
         for x in rows:
             v = re.search(r"\d{4}-\d{2}-\d{2}", str(x[col]))
             if v:

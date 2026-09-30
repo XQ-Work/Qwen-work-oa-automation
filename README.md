@@ -23,8 +23,8 @@
 
 | 编号 | 功能 | OA流程/workflowid | 入口 |
 |---|---|---|---|
-| m01 | 事项审批一条龙 | 070801 / 475401 | `modules/m01_shxiang/fill_oa.py --row N --save` |
-| m02 | 申购单生成 | — | `modules/m02_sggen/make_sg.py --ledger` |
+| m01 | 申购单生成 | — | `modules/m01_sggen/make_sg.py --ledger` |
+| m02 | 事项审批一条龙 | 070801 / 475401 | `modules/m02_shxiang/fill_oa.py --row N --save` |
 | m03 | 比质比价报告单 | — | `modules/m03_bizhijie/bizhijie.py` |
 | m03b | 供应商对比报告 | — | `modules/m03b_supplier_info/` |
 | m04 | 供应商新增 | 444401 | `modules/m04_supplier/fill_supplier.py` |

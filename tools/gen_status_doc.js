@@ -37,8 +37,8 @@ const children = [
   table(
     ["部件", "职责", "入口"],
     [
-      ["M01 事项审批", "070801/475401 填单存草稿+归档回写", "modules/m01_shxiang/fill_oa.py --row N --save"],
-      ["M02 申购单", "需求台账→申购单（自动落输入口+交付区）", "modules/m02_sggen/make_sg.py --ledger"],
+      ["M01 申购单", "需求台账→申购单（自动落输入口+交付区）", "modules/m01_sggen/make_sg.py --ledger"],
+      ["M02 事项审批", "070801/475401 填单存草稿+归档回写", "modules/m02_shxiang/fill_oa.py --row N --save"],
       ["M03 比质比价", "报价SQLite→报告单生成（含交付副本）", "modules/m03_bizhijie/bizhijie.py"],
       ["M03b 供应商对比", "企业画像库+横向对比报告", "modules/m03b_supplier_info"],
       ["M04 供应商新增", "444401 建档填单", "modules/m04_supplier/fill_supplier.py"],
