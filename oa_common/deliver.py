@@ -118,7 +118,26 @@ def stage(func, files, matter):
     out_dir.mkdir(parents=True, exist_ok=True)
     latest = max(v["mtime"] for v in members.values())
     datep = dt.datetime.fromtimestamp(latest).strftime("%Y%m%d")
-    dst = out_dir / f"{datep}{func}（{matter}）.pdf"
+    # 统一口径：事项名·金额（成员文件名里的金额求和；识别 金额：X 或 结尾_X 两种）
+    amts = []
+    for mp in members:
+        n = Path(mp).name
+        m = re.search(r"金额[：:]\s*(\d+(?:\.\d+)?)", n)
+        if not m:
+            m2 = re.search(r"_(\d+(?:\.\d+)?)[^_]*$", n)
+            # 尾数当金额需≥100，避免把版本副本 _2 / 页码后缀误认成金额
+            if m2 and float(m2.group(1)) >= 100:
+                m = m2
+        if m:
+            try:
+                amts.append(float(m.group(1)))
+            except ValueError:
+                pass
+    amt_txt = ""
+    if amts:
+        s = round(sum(amts), 2)
+        amt_txt = "·金额：" + (str(int(s)) if s == int(s) else f"{s:.2f}")
+    dst = out_dir / f"{datep}{func}（{matter}{amt_txt}）.pdf"
     sig = "|".join(sorted(f"{k.split('/')[-1]}:{v['sha']}" for k, v in members.items()))
     if not changed and man.get("_sig", {}).get(key) == sig and dst.exists():
         _save(man)

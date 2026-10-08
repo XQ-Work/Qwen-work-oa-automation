@@ -53,11 +53,25 @@ def main():
     ok, fail = 0, []
     for i, p in enumerate(todo, 1):
         name = os.path.basename(p)
+        # 长文件名+全角括号会让 Word 拒写输出：复制为短临时名转换，再改回目标名
+        ext = os.path.splitext(p)[1]
+        short_p = os.path.join(out_dir, "_t%d%s" % (i, ext))
+        import shutil
+        shutil.copy2(p, short_p)
         try:
-            done = _docx_to_pdf(p, out_dir)
+            done = _docx_to_pdf(short_p, out_dir)
+            produced = os.path.join(out_dir, os.path.splitext(os.path.basename(short_p))[0] + ".pdf")
+            target = os.path.join(out_dir, os.path.splitext(name)[0] + ".pdf")
+            if os.path.exists(produced) and produced != target:
+                os.replace(produced, target)
         except Exception as e:
             done = False
             print("  [%d/%d] %s -> 异常: %s" % (i, len(todo), name, e))
+        finally:
+            try:
+                os.remove(short_p)
+            except OSError:
+                pass
         if done:
             print("  [%d/%d] %s -> PDF 完成" % (i, len(todo), name))
             ok += 1

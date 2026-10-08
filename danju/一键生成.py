@@ -1379,11 +1379,14 @@ has_tpl_pay = os.path.exists(TEMPLATE_PAY_XLSX)
 has_db = os.path.exists(DATABASE_XLSX)
 
 def _supplier_same(name_a, name_b):
-    """供应商名称互认：去地域前缀后取关键词，任一方向包含即算同一供应商。"""
+    """供应商名称互认：去地域前缀与通用词后取关键词，任一方向包含即算同一供应商。"""
+    GENERIC = ("个体工商户", "有限公司", "有限责任公司", "股份有限公司", "合伙企业")
     def _kws(s):
         s = str(s or "")
         for p in ("荆州经济技术开发区", "荆州市", "荆州区", "沙市区", "荆州", "湖北省"):
             s = s.replace(p, "")
+        for g in GENERIC:
+            s = s.replace("（" + g + "）", "").replace("(" + g + ")", "").replace(g, "")
         parts = re.split(r"[^0-9A-Za-z\u4e00-\u9fa5]+", s)
         return [p for p in parts if len(p) >= 2]
     ka, kb = _kws(name_a), _kws(name_b)
@@ -1674,9 +1677,8 @@ if has_receipt_unpaid and has_tpl_pay and has_db:
             wb.Close(False)
             xl.Quit()
             print("  付款单PDF: %s" % os.path.basename(pdf_path))
-        except Exception:
-            subprocess.run(["soffice","--headless","--convert-to","pdf","--outdir",OUTPUT_PDF_PAY_DIR,output_xlsx], capture_output=True)
-            print("  付款单PDF(soffice): %s" % output_name.replace(".xlsx", ".pdf"))
+        except Exception as e:
+            print("  付款单PDF导出失败(COM): %s，稍后用 80_工具\to_pdf.py 补转" % str(e)[:60])
 
         # 验证
         print("  --- 验证 ---")

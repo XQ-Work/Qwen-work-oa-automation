@@ -84,6 +84,25 @@ def now():
     return dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def content_route(f):
+    """PDF 首页文字层关键词兜底：文件名不认识时看内容。"""
+    if f.suffix.lower() != ".pdf":
+        return None
+    try:
+        import pymupdf as fitz
+        with fitz.open(str(f.resolve())) as d:
+            head = d[0].get_text()[:600]
+    except Exception:
+        return None
+    if "入库单" in head or "采购入库" in head:
+        return ("danju", "单据类·入库(内容识别)")
+    if "发票号码" in head or "电子发票" in head:
+        return ("danju", "单据类·发票记账(内容识别)")
+    if "回单" in head or "交易流水" in head:
+        return ("recv", "M07·回单扫描(内容识别)")
+    return None
+
+
 def classify(stem):
     """文件名 -> (规范材料名, 事项名, 金额或None, 动作, 阶段夹)；认不出返回 None+原因。"""
     m = NAME_RE.match(stem.strip())
@@ -103,6 +122,12 @@ def classify(stem):
     matter = re.sub(r"\s+", "", inner)
     if len(matter) < 2:
         return None, "括号内事项名过短"
+    # 采购合同带用印标记 = 付款侧必传的盖章扫描版：剥掉标记归 05 夹，不走合同抽取链
+    if canon == "合同" and re.search(r"已用印|已盖章|用印版", matter):
+        matter = re.sub(r"(已用印|已盖章|用印版)", "", matter)
+        if not matter:
+            return None, "用印合同缺事项名"
+        return ("用印合同", matter, amt, "archive", "05_付款及验收"), None
     return (canon, matter, amt, act, stage), None
 
 
@@ -243,18 +268,22 @@ def cmd_scan(inbox, live=False, ledger_mode="real"):
         if not plan:
             # 类型兜底：未按命名规范投递的，按文件名特征分流进各流水线进料口
             tr = next(((k, w) for rx, k, w in TYPE_ROUTES if rx.search(f.name)), None)
+            if not tr:
+                tr = content_route(f)
             if tr:
                 kind, why = tr
                 tgt = DANJU_IN if kind == "danju" else (RECV_DIR / "输入")
                 h = sha256(f)
                 key = f"{f.name}|{h[:16]}"
                 if key in done:
-                    print(f"[已处理] {f.name}  ->  {done[key]}")
+                    print(f"[重复投递] {f.name}  （原件已在 {done[key]}，移入 复核/内容幂等 人工处理）")
                     if live:
-                        f.unlink()
+                        dup = paths.EXCEPT.parent / "内容幂等"
+                        place(f, dup, f.name)
                     continue
                 print(f"[类型分流] {f.name}  ->  {why}")
                 if live:
+                    moved += 1
                     dst = place(f, tgt, f.name)
                     done[key] = str(dst)
                     tp = "danju" if kind == "danju" else "m07"
@@ -282,9 +311,10 @@ def cmd_scan(inbox, live=False, ledger_mode="real"):
         h = sha256(f)
         key = f"{f.name}|{h[:16]}"   # 同名同内容才算重复投递（同内容不同材料名要允许）
         if key in done:
-            print(f"[已处理] {f.name}  ->  {done[key]}")
+            print(f"[重复投递] {f.name}  （原件已在 {done[key]}，移入 复核/内容幂等 人工处理）")
             if live:
-                f.unlink()
+                dup = paths.EXCEPT.parent / "内容幂等"
+                place(f, dup, f.name)
             continue
         show = (str(tgt.relative_to(paths.DATA)) if act in ("m07", "danju")
                 else f"{proj.name}/{stage}")
@@ -296,6 +326,12 @@ def cmd_scan(inbox, live=False, ledger_mode="real"):
         dst = place(f, tgt, f.name)
         done[key] = str(dst)
         _index(dst, material=canon, proj=proj)
+        if canon == "事项审批":          # 交付区同步出册：事项审批导出PDF
+            try:
+                from oa_common import deliver
+                deliver.stage("事项审批", [dst], matter)
+            except Exception as e:
+                print("    [交付] 失败(不影响收料): " + str(e)[:60])
         if act == "archive":
             save_json(DONE_F, done)
             continue
@@ -354,6 +390,20 @@ def cmd_flush(only=None):
     ran_danju = False
     for t, items in by_type.items():
         print(f"\n### {t}: {len(items)} 项")
+        if t in ("danju", "m07") and items:      # 组批：跑一次全家，组内统一记账
+            one = items[0]
+            one["attempts"] = one.get("attempts", 0) + 1
+            cmd = ([sys.executable, str(BASE / "danju/adapter.py"), "run"] if t == "danju"
+                   else [sys.executable, str(BASE / "modules/m07_receipt/match_archive.py")])
+            code, out = run_sub(cmd)
+            tail = out.strip().splitlines()[-1] if out.strip() else ""
+            for q in items:
+                q["attempts"] = q.get("attempts", 0) + 1
+                q["status"] = "done" if code == 0 else "failed"
+                q["last_err"] = tail[:120]
+            save_json(QUEUE_F, queue)
+            print(f"  [{'ok ' if code == 0 else 'ERR'}] {t} 组批 x{len(items)} 一次执行  {tail[:70]}")
+            continue
         for q in items:
             if q["type"] in ("m05", "m06") and not q.get("row"):
                 q["status"] = "needs_review"
@@ -506,16 +556,10 @@ def _danju_usage(sup, amt):
     """兜底：从单据类库里按 供应商+金额 找发票用途（Lane B 无付款台账行时当事项名）。"""
     try:
         import sqlite3
-        env = os.environ.get("DJ_BASE")
-        dj = Path(env) if env else None
-        if not dj:
-            try:
-                with open(BASE / "config.json", encoding="utf-8") as fh:
-                    cfg = json.load(fh)
-                b = cfg.get("danju_base")
-                dj = Path(b) if b else None
-            except Exception:
-                dj = None
+        try:
+            dj = Path(paths.DANJU_BASE)
+        except Exception:
+            dj = None
         dbp = (dj or BASE / "danju") / "60_数据" / "单据.db"
         if not dbp.exists():
             return None
@@ -540,7 +584,7 @@ def cmd_reflow(dry=False):
     log = load_json(REFLOW_LOG, {})
     manual = []
     n_seed = 0
-    for sub, mat in [("付款单", "付款单"), ("验收单", "验收资料")]:
+    for sub, mat in [("付款单", "付款单"), ("验收单", "验收资料"), ("发票", "发票")]:
         d = DANJU_OUT / sub
         if not d.is_dir():
             continue
@@ -550,7 +594,9 @@ def cmd_reflow(dry=False):
             key = f"{sub}|{f.name}|{f.stat().st_size}"
             if key in log:
                 continue
-            if first_run:
+            import datetime as _d
+            today = _d.date.today()
+            if first_run and _d.date.fromtimestamp(f.stat().st_mtime) < today:
                 log[key] = "seed存量"
                 n_seed += 1
                 continue
@@ -558,6 +604,8 @@ def cmd_reflow(dry=False):
             parts = f.stem.split("_")
             sup = ""
             if m and len(parts) >= 2:
+                # 去掉大类前缀词，取真正的供应商段
+                parts = [x for x in parts if x not in ("发票", "付款单", "验收单", "入库单扫描件", "申购单", "事项审批")]
                 amt = m.group(1)
                 for j in range(len(parts) - 1, 0, -1):
                     if parts[j] == "_" + amt or parts[j] == amt:
@@ -568,25 +616,33 @@ def cmd_reflow(dry=False):
             if not (amt and sup and not sup.isdigit()):
                 manual.append((f, "文件名解析不出供应商/金额"))
                 continue
+            src = f                                      # PDF优先：同目录或 30_待打印 里的同名PDF
+            for cand in (f.parent / (f.stem + ".pdf"), BASE.parent.parent / "工作/单据/30_待打印" / (f.stem + ".pdf")):
+                pass
+            from oa_common import paths as _pp
+            for cand in (f.parent / (f.stem + ".pdf"), _pp.DANJU_BASE / "30_待打印" / (f.stem + ".pdf")):
+                if cand.exists():
+                    src = cand
+                    break
             hits = _match_payee_rows(sup, amt)
             uniq = sorted({mt for _, mt in hits})
-            try:                           # 交付区：转PDF+按事项合并（匹配不到用供应商名）
-                from oa_common import deliver
-                deliver.stage(sub, [f], uniq[0] if len(uniq) == 1 else sup)
-            except Exception as e:
-                print("  [交付] 失败(不影响回流):", str(e)[:60])
             if not uniq:
                 usage = _danju_usage(sup, amt)
                 if usage:
                     uniq = [usage]
+            try:                           # 交付区：转PDF+按事项合并（在用途兜底之后，口径一致）
+                from oa_common import deliver
+                deliver.stage(sub, [src], uniq[0] if len(uniq) == 1 else sup)
+            except Exception as e:
+                print("  [交付] 失败(不影响回流):", str(e)[:60])
             dst = None
             if len(uniq) == 1:
                 tag = "" if hits else "（按发票用途）"
-                dst = paths.INBOX / f"{mat}（{uniq[0]}）{f.suffix}"
+                dst = paths.INBOX / f"{mat}（{uniq[0]}）{src.suffix}"
                 print(f"[回流] {f.name} -> {dst.name}{tag}")
                 if not dry:
                     paths.INBOX.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(str(f), str(dst))
+                    shutil.copy2(str(src), str(dst))
             else:
                 manual.append((f, f"事项不唯一{uniq or '无命中'}"))
             if not dry and dst:
