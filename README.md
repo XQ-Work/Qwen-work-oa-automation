@@ -13,7 +13,7 @@
 │            未按命名的按词头兜底（dzfp_/入库单→单据、回单/流水→银行回单），认不出→工作/复核/收件异常
 ├── 工作/    发起收件箱(make_sg 生成的申购单落此) · 单据(入库→验收→付款) · 银行回单(扫描→核对→确认) · 复核(人工异常件)
 │            intake run 同时扫 输入 与 工作/发起收件箱
-├── 记录/    台账(发起台账+台账快照) · 数据库(金额链主档+文档索引) · 项目档案(2026-NNN，01~06阶段子夹)【任务轨：过程全量，办结后原地不动】
+├── 记录/    台账(发起台账+台账快照) · 数据库(金额链主档+文档索引) · 项目档案(2026-NNN，01~06阶段子夹)【任务轨：过程全量，办结后原地不动】 · 已用投料(退役的源件，带日期前缀)
 ├── 系统/    oa-automation(本仓库) · docs · 模板(01申购单~04流程表单) · 运行(浏览器登录态+state)
 ├── 交付/    成品PDF副本区：按事项自动合并成册、日期前缀，打印送签用
 └── 归档/    【查阅轨】交付定稿册，按 2000 元限值分架 日常采购(<2000)/采购合同(≥2000)：
@@ -48,7 +48,8 @@ python intake_all.py run            # 收料：分流+归档+建档+排队（不
 python intake_all.py flush          # 攒批发草稿（开浏览器，失败留队可重试）
 python intake_all.py status         # 队列/收件箱/异常一览
 python intake_all.py verify --project 2026-005   # 单项目齐套核对
-python intake_all.py archive --project 2026-005  # 办结归档（--undo 取出）
+python intake_all.py archive --project 2026-005  # 归档（交付齐即入架·待付；回单到重跑升〔办结〕，--undo 取出）
+python tools/retire_input.py "输入/申购单.xlsx"    # 收尾：用过的投料源件退役到 记录/已用投料（带日期，零删除）
 python -m oa_common.moneyline report             # 金额对账
 python -m oa_common.docindex search 质保金        # 全文检索附件内容
 python tools/env_doctor.py          # 换机自检（--fix 重建junction）

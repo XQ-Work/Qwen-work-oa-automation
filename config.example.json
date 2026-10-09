@@ -12,6 +12,7 @@
   "danju_base": "工作/单据",
   "inbox_rel": "输入",
   "sg_inbox_rel": "工作/发起收件箱",
+  "used_inbox_rel": "记录/已用投料",
   "template_rel": "系统/oa-automation/templates",
   "archive_rel": "记录/项目档案",
   "except_rel": "工作/复核/收件异常",
