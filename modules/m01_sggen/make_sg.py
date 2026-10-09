@@ -32,12 +32,12 @@ from openpyxl.utils import column_index_from_string
 
 BASE = paths.STATE
 TPL_DIR = paths.TPL_SG
-INBOX = paths.INBOX
+INBOX = paths.SG_INBOX          # 发起收件箱（与投料口 输入 分开）
 # 模板关键词、表头单元格、明细表列布局（1 基）
 TPL = {
-    "货物": {"kw": "采购", "日期": "F2", "预计": "F3", "说明": "C4",
+    "货物": {"kw": "采购", "部门": "C2", "日期": "F2", "预计": "F3", "说明": "C4",
              "cols": (1, 2, 3, 4, 5, 6)},
-    "服务": {"kw": "服务", "日期": "G2", "预计": "G3", "说明": "C4",
+    "服务": {"kw": "服务", "部门": "C2", "日期": "G2", "预计": "G3", "说明": "C4",
              "cols": (1, 2, 3, 5, 6, 7)},
 }
 
@@ -84,8 +84,10 @@ def gen(req):
     if len(rows) > last - first + 1:
         raise SystemExit(f"明细 {len(rows)} 行超出模板容量 {last - first + 1} 行")
 
-    # 表头：申购日期=今天；预计使用日期、申购说明按需覆盖
-    ws[cfg["日期"]] = _today()
+    # 表头：申购日期（台账给了就用，否则今天）；申购部门、预计使用日期、申购说明按需覆盖
+    ws[cfg["日期"]] = str(req.get("申购日期") or _today())
+    if req.get("申购部门"):
+        ws[cfg["部门"]] = str(req["申购部门"])
     if req.get("预计使用日期"):
         ws[cfg["预计"]] = str(req["预计使用日期"])
     ws[cfg["说明"]] = req.get("申购说明", name)
@@ -105,48 +107,69 @@ def gen(req):
         ws.cell(row=r, column=c_unit, value=item.get("单位", ""))
         ws.cell(row=r, column=c_qty, value=item.get("数量", ""))
         ws.cell(row=r, column=c_note, value=item.get("备注", ""))
+        # 名称/规格过长会折行：按折行数抬高行高，避免固定行高把第二行裁掉
+        import math
+        disp = lambda s: sum(1 if ord(ch) > 0x2E80 else 0.55 for ch in str(s))
+        lines = max(math.ceil(disp(item.get("名称", "")) / 8),
+                    math.ceil(disp(item.get("规格", "")) / 9), 1)
+        if lines > 1:
+            ws.row_dimensions[r].height = 15 * lines + 4
 
+    INBOX.mkdir(parents=True, exist_ok=True)
     out = INBOX / f"申购单（{name}-金额：{_fmt_amt(amt)}）.xlsx"
     wb.save(out)
-    from oa_common import deliver          # 交付区：转PDF+按事项合并
-    deliver.stage("申购单", [out], name)
     print(f"[ok] 生成 {out.name}（{cat}类，{len(rows)}行明细）")
+    try:                                    # 交付区转PDF失败不影响申购单主产物
+        from oa_common import deliver
+        deliver.stage("申购单", [out], name)
+    except Exception as e:
+        print(f"  [交付] 申购单转PDF失败(不影响生成): {str(e)[:60]}")
     return out
 
 
 SG_LEDGER = paths.LEDGER_SG
 
 
+def _colmap(ws):
+    """表头名(去掉尾部*) -> 列号。台账挪列/加列/改名(除关键字)都不用动代码。"""
+    m = {}
+    for c in range(1, ws.max_column + 1):
+        h = str(ws.cell(1, c).value or '').strip().rstrip('*')
+        if h:
+            m.setdefault(h, c)
+    return m
+
+
 def read_ledger_groups():
-    """读申购单需求台账 -> [(事项名, 组信息)]；状态为空且非示例的行才处理"""
+    """读申购单需求台账 -> [(事项名, 组信息)]；状态为空且非示例的行才处理。"""
     wb = load_workbook(SG_LEDGER, data_only=True)
     ws = wb["需求台账"]
+    m = _colmap(ws)
+
+    def val(r, key):
+        c = m.get(key)
+        v = ws.cell(row=r, column=c).value if c else None
+        return str(v).strip() if v is not None else ""
+
     groups, order = {}, []
     for r in range(2, ws.max_row + 1):
-        name = ws.cell(row=r, column=2).value
-        status = ws.cell(row=r, column=12).value
-        if not name or not str(name).strip():
+        name = val(r, "事项名")
+        if not name or val(r, "状态") in ("示例", "已生成"):
             continue
-        name = str(name).strip()
-        if status and str(status).strip() in ("示例", "已生成"):
-            continue
-        g = groups.setdefault(name, {"rows": [], "类别": "", "金额": "",
-                                     "申购说明": "", "预计使用日期": ""})
-        g["rows"].append({
-            "row": r,
-            "名称": str(ws.cell(row=r, column=7).value or "").strip(),
-            "规格": str(ws.cell(row=r, column=8).value or "").strip(),
-            "单位": str(ws.cell(row=r, column=9).value or "").strip(),
-            "数量": str(ws.cell(row=r, column=10).value or "").strip(),
-            "备注": str(ws.cell(row=r, column=11).value or "").strip(),
-        })
+        g = groups.setdefault(name, {"rows": [], "类别": "", "金额": "", "申购说明": "",
+                                     "预计使用日期": "", "申购部门": "", "申购日期": ""})
+        g["rows"].append({"row": r, "名称": val(r, "物资名称"),
+                          "规格": val(r, "规格型号及技术要求"), "单位": val(r, "单位"),
+                          "数量": val(r, "数量"), "备注": val(r, "备注")})
         if len(g["rows"]) == 1:
             order.append(name)
-            g["类别"] = str(ws.cell(row=r, column=3).value or "").strip()
-            amt = ws.cell(row=r, column=4).value
-            g["金额"] = str(amt).strip() if amt is not None else ""
-            g["申购说明"] = str(ws.cell(row=r, column=5).value or "").strip()
-            g["预计使用日期"] = str(ws.cell(row=r, column=6).value or "").strip()
+            cat = val(r, "类别")
+            g["类别"] = "服务" if "服务" in cat else "货物"
+            g["金额"] = val(r, "预估金额（元）") or val(r, "预估金额")
+            g["申购说明"] = val(r, "申购说明")
+            g["预计使用日期"] = val(r, "预计使用日期")
+            g["申购部门"] = val(r, "申购部门")
+            g["申购日期"] = val(r, "申购日期")
     wb.close()
     return [(name, groups[name]) for name in order]
 
@@ -154,10 +177,14 @@ def read_ledger_groups():
 def write_back(rows, status="已生成"):
     wb = load_workbook(SG_LEDGER)
     ws = wb["需求台账"]
+    m = _colmap(ws)
+    c_st, c_tm = m.get("状态"), m.get("生成时间")
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     for r in rows:
-        ws.cell(row=r, column=12, value=status)
-        ws.cell(row=r, column=13, value=now)
+        if c_st:
+            ws.cell(row=r, column=c_st, value=status)
+        if c_tm:
+            ws.cell(row=r, column=c_tm, value=now)
     wb.save(SG_LEDGER)
 
 
@@ -172,6 +199,7 @@ def run_ledger():
             req = {"类别": g["类别"] or "货物", "事项名": name, "金额": g["金额"],
                    "申购说明": g["申购说明"] or name,
                    "预计使用日期": g["预计使用日期"],
+                   "申购部门": g["申购部门"], "申购日期": g["申购日期"],
                    "明细": [{k: it[k] for k in ("名称", "规格", "单位", "数量", "备注")}
                             for it in g["rows"]]}
             gen(req)

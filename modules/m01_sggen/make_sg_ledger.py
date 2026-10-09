@@ -12,9 +12,9 @@ OUT = str(_paths.LEDGER_SG)
 
 HEADERS = [
     ("序号", 6), ("事项名*", 18), ("类别*", 10), ("预估金额（元）*", 14),
-    ("申购说明*", 30), ("预计使用日期", 12), ("物资名称*", 16),
-    ("规格型号及技术要求", 26), ("单位", 8), ("数量", 8), ("备注", 14),
-    ("状态", 10), ("生成时间", 16), ("备注2", 14),
+    ("申购部门", 12), ("申购日期", 12), ("申购说明*", 30), ("预计使用日期", 12),
+    ("物资名称*", 16), ("规格型号及技术要求", 26), ("单位", 8), ("数量", 8),
+    ("备注", 14), ("状态", 10), ("生成时间", 16), ("备注2", 14),
 ]
 YELLOW = PatternFill("solid", fgColor="FFF2CC")
 GREEN = PatternFill("solid", fgColor="E2EFDA")
@@ -35,15 +35,15 @@ for col, (name, width) in enumerate(HEADERS, 1):
     ws.column_dimensions[get_column_letter(col)].width = width
 ws.row_dimensions[1].height = 30
 
-fills = {2: YELLOW, 3: YELLOW, 4: YELLOW, 5: YELLOW, 7: YELLOW,
-         6: GREEN, 8: GREEN, 9: GREEN, 10: GREEN, 11: GREEN, 14: GREEN,
-         12: GRAY, 13: GRAY}
+fills = {2: YELLOW, 3: YELLOW, 4: YELLOW, 7: YELLOW, 9: YELLOW,
+         5: GREEN, 6: GREEN, 8: GREEN, 10: GREEN, 11: GREEN, 12: GREEN, 13: GREEN, 16: GREEN,
+         14: GRAY, 15: GRAY}
 
 # 示例组：同一事项名两行 = 一张申购单
 examples = [
-    ["示例", "示例阀门申购", "货物", 1234.5, "因维修需要申购阀门一批", "2026.10",
+    ["示例", "示例阀门申购", "货物", 1234.5, "综合部", "2026.9.1", "因维修需要申购阀门一批", "2026.10",
      "DN100闸阀", "PN10", "个", "4", "", "示例", "", ""],
-    ["示例", "示例阀门申购", "", "", "", "",
+    ["示例", "示例阀门申购", "", "", "", "", "", "",
      "止回阀", "H44H-16 DN80", "个", "2", "备用", "示例", "", ""],
 ]
 for r, row in enumerate(examples, 2):
@@ -68,7 +68,7 @@ dv = DataValidation(type="list", formula1='"货物,服务"', allow_blank=True,
 ws.add_data_validation(dv)
 dv.add("C4:C303")
 ws.freeze_panes = "B2"
-ws.auto_filter.ref = "A1:N303"
+ws.auto_filter.ref = "A1:P303"
 
 gd = wb.create_sheet("填写说明")
 gd.column_dimensions["A"].width = 100

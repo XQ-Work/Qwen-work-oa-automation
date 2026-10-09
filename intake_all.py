@@ -935,7 +935,8 @@ def cmd_status():
     for q in queue:
         if q["status"] in ("queued", "failed", "parse_failed", "needs_agent", "needs_review"):
             print(f"  [{q['status']}] {q['type']} {q['matter']} row={q.get('row')} {q.get('last_err','')[:60]}")
-    n_box = len([f for f in paths.INBOX.iterdir() if f.is_file()]) if paths.INBOX.is_dir() else 0
+    n_box = sum(len([f for f in d.iterdir() if f.is_file()])
+                for d in (paths.INBOX, paths.SG_INBOX) if d.is_dir())
     n_ex = len([f for f in EXCEPT_DIR.iterdir() if f.is_file()]) if EXCEPT_DIR.is_dir() else 0
     print(f"收件箱待收料: {n_box} 个文件；收件异常待处理: {n_ex} 个")
 
@@ -965,10 +966,16 @@ def main():
     if a.archive_root:
         paths.ARCHIVE = Path(a.archive_root)
     only = [x.strip() for x in a.only.split(",") if x.strip()] or None
+    # 扫描目录：投料口(输入) + 发起收件箱，去重；自测只扫传入的临时口
+    scan_dirs = [Path(a.inbox)]
+    if not a.selftest and Path(paths.SG_INBOX).resolve() != Path(a.inbox).resolve():
+        scan_dirs.append(Path(paths.SG_INBOX))
     if a.cmd == "scan":
-        cmd_scan(Path(a.inbox))
+        for d in scan_dirs:
+            cmd_scan(d)
     elif a.cmd == "run":
-        cmd_scan(Path(a.inbox), live=True, ledger_mode="copy" if a.selftest else "real")
+        for d in scan_dirs:
+            cmd_scan(d, live=True, ledger_mode="copy" if a.selftest else "real")
     elif a.cmd == "flush":
         cmd_flush(only)
     elif a.cmd == "verify":
