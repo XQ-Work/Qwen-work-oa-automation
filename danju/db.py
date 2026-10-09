@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS receipts (
 CREATE TABLE IF NOT EXISTS receipt_items (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     receipt_id TEXT NOT NULL,
+    line       INTEGER DEFAULT 0,
     code       TEXT,
     name       TEXT,
     spec       TEXT,
@@ -61,6 +62,17 @@ def connect():
 def init_db():
     conn = connect()
     conn.executescript(SCHEMA)
+    # 迁移：老库 receipt_items 无 line 列 → 补列并按插入顺序（id）回填行号
+    cols = [r["name"] for r in conn.execute("PRAGMA table_info(receipt_items)")]
+    if "line" not in cols:
+        conn.execute("ALTER TABLE receipt_items ADD COLUMN line INTEGER DEFAULT 0")
+        rows = conn.execute("SELECT id, receipt_id FROM receipt_items ORDER BY receipt_id, id").fetchall()
+        seq, last = 0, None
+        for r in rows:
+            if r["receipt_id"] != last:
+                seq, last = 0, r["receipt_id"]
+            seq += 1
+            conn.execute("UPDATE receipt_items SET line=? WHERE id=?", (seq, r["id"]))
     conn.commit()
     conn.close()
 
@@ -74,7 +86,8 @@ def get_receipt(receipt_id):
         return None
     r = dict(row)
     r["items"] = [dict(x) for x in conn.execute(
-        "SELECT code,name,spec,unit,qty,price,amount FROM receipt_items WHERE receipt_id=?",
+        "SELECT code,name,spec,unit,qty,price,amount FROM receipt_items "
+        "WHERE receipt_id=? ORDER BY line, id",
         (receipt_id,)).fetchall()]
     conn.close()
     return r
@@ -116,11 +129,11 @@ def add_receipt(receipt_id, data):
         (receipt_id, data.get("date", ""), data.get("supplier", ""),
          data.get("supplier_short", ""), data.get("total", 0)))
     cur.execute("DELETE FROM receipt_items WHERE receipt_id=?", (receipt_id,))
-    for it in data.get("items", []):
+    for n, it in enumerate(data.get("items", []), 1):
         cur.execute(
-            "INSERT INTO receipt_items (receipt_id, code, name, spec, unit, qty, price, amount) "
-            "VALUES (?,?,?,?,?,?,?,?)",
-            (receipt_id, it.get("code", ""), it.get("name", ""), it.get("spec", "") or "",
+            "INSERT INTO receipt_items (receipt_id, line, code, name, spec, unit, qty, price, amount) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (receipt_id, n, it.get("code", ""), it.get("name", ""), it.get("spec", "") or "",
              it.get("unit", ""), it.get("qty", 0), it.get("price", 0), it.get("amount", 0)))
     conn.commit()
     conn.close()

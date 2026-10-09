@@ -148,6 +148,42 @@ def cmd_total(args):
     print("已将单号 %s 合计金额改为 %s" % (args.id, args.amount))
 
 
+def cmd_renumber(args):
+    """按原图行序重排明细：--order 传逗号分隔的物料编码（或名称），
+    未列出的行保持原相对顺序排在最后。事后补行导致行序与原图不符时用。"""
+    conn = db.connect()
+    rows = conn.execute("SELECT id, code, name, line FROM receipt_items "
+                        "WHERE receipt_id=? ORDER BY line, id", (args.id,)).fetchall()
+    if not rows:
+        conn.close()
+        raise SystemExit("[拒写] 单号 %s 无明细" % args.id)
+    keys = [k.strip() for k in (args.order or "").split(",") if k.strip()]
+    by = {}
+    for r in rows:
+        by.setdefault(r["code"], r)
+        by.setdefault(r["name"], r)
+    picked, used = [], set()
+    for k in keys:
+        r = by.get(k)
+        if r is None:
+            conn.close()
+            raise SystemExit("[拒写] 行键 %r 不在该单明细中（现有: %s）" % (
+                k, "、".join(x["code"] or x["name"] for x in rows)))
+        if r["id"] not in used:
+            used.add(r["id"])
+            picked.append(r)
+    picked += [r for r in rows if r["id"] not in used]
+    if len(picked) != len(rows):
+        conn.close()
+        raise SystemExit("[拒写] 行数不守恒，中止")
+    for n, r in enumerate(picked, 1):
+        conn.execute("UPDATE receipt_items SET line=? WHERE id=?", (n, r["id"]))
+    conn.commit()
+    conn.close()
+    print("已将 %s 重排为票面行序: %s" % (args.id, " → ".join(
+        "%d.%s" % (n, r["name"]) for n, r in enumerate(picked, 1))))
+
+
 def cmd_audit(args):
     """全库对账：每张入库单 表头合计 vs 明细合计。漏行/差一分钱都揪出来。"""
     bad = 0
@@ -186,6 +222,11 @@ def main():
 
     p = sub.add_parser("audit", help="全库对账：表头合计 vs 明细合计")
     p.set_defaults(fn=cmd_audit)
+
+    p = sub.add_parser("renumber", help="按原图行序重排明细（--order 逗号分隔编码/名称）")
+    p.add_argument("id")
+    p.add_argument("--order", required=True)
+    p.set_defaults(fn=cmd_renumber)
 
     p = sub.add_parser("usage", help="补/改发票用途")
     p.add_argument("filename")
