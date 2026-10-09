@@ -65,11 +65,33 @@ def cmd_show(args):
             fl(it["price"]), fl(it["amount"]), it["code"] or ""))
 
 
+def _guard_total(receipt_id, items, header_total):
+    """补录闸门：明细合计必须与入库单表头合计对上（±1 元容差）。
+    主流程的 cross_validate_items 只长在 一键生成.py 里，补录侧门必须自带，
+    否则看图漏行这类错误会无声入库（CGSH202609220003 漏"统一重负荷齿轮油"即此教训）。"""
+    s = round(sum(float(i.get("amount") or 0) for i in items), 2)
+    if header_total is None:
+        raise SystemExit("[拒写] %s：补录必须提供表头合计 --total（以原图为准），"
+                         "防止漏行无声入库" % receipt_id)
+    if abs(s - float(header_total)) > 1:
+        raise SystemExit("[拒写] %s：明细合计 %.2f ≠ 表头合计 %.2f（差 %.2f），"
+                         "请对照原图补行或改 --total" % (
+                             receipt_id, s, float(header_total), float(header_total) - s))
+    for i, it in enumerate(items, 1):
+        q, p, a = (float(it.get(k) or 0) for k in ("qty", "price", "amount"))
+        if q > 0 and p > 0 and abs(q * p - a) > 0.5:
+            print("  WARNING 第%d项 %s: 数量%g×单价%.2f≠金额%.2f" % (i, it.get("name", "?"), q, p, a))
+    print("  闸门通过: %d 项合计 %.2f = 表头 %.2f" % (len(items), s, float(header_total)))
+
+
 def _interactive_add(receipt_id, args):
     print("交互式补录单号 %s （输入 q 结束物料录入）" % receipt_id)
     date = input("日期(YYYY-MM-DD) [%s]: " % (args.date or "")).strip() or (args.date or "")
     supplier = input("供应商全称 [%s]: " % (args.supplier or "")).strip() or (args.supplier or "")
     short = input("供应商简称 [%s]: " % (args.short or "")).strip() or (args.short or "")
+    header_total = input("入库单表头合计金额(必填，以原图为准): ").strip()
+    if not header_total:
+        raise SystemExit("[拒写] 未提供表头合计，无法核对漏行")
     items = []
     while True:
         line = input("物料(名称|规格|单位|数量|单价): ").strip()
@@ -84,9 +106,11 @@ def _interactive_add(receipt_id, args):
         items.append(dict(code=p[5] if len(p) > 5 else "", name=name, spec=spec, unit=unit,
                           qty=qty, price=price, amount=round(qty * price, 2)))
     total = sum(i["amount"] for i in items)
-    data = dict(date=date, supplier=supplier, supplier_short=short, total=total, items=items)
+    data = dict(date=date, supplier=supplier, supplier_short=short,
+                total=float(header_total), items=items)
+    _guard_total(receipt_id, items, float(header_total))
     db.add_receipt(receipt_id, data)
-    print("已写入单号 %s（物料 %d 条，合计 %.2f）" % (receipt_id, len(items), total))
+    print("已写入单号 %s（物料 %d 条，合计 %.2f）" % (receipt_id, len(items), data["total"]))
 
 
 def cmd_add(args):
@@ -103,8 +127,8 @@ def cmd_add(args):
             code = p[5] if len(p) > 5 else ""
             data["items"].append(dict(code=code, name=name, spec=spec, unit=unit,
                                       qty=qty, price=price, amount=round(qty * price, 2)))
-        if args.total is None:
-            data["total"] = sum(i["amount"] for i in data["items"])
+        _guard_total(args.id, data["items"], args.total)
+        data["total"] = float(args.total)
         db.add_receipt(args.id, data)
         print("已写入单号 %s（物料 %d 条，合计 %.2f）" % (args.id, len(data["items"]), data["total"]))
     else:
@@ -124,6 +148,21 @@ def cmd_total(args):
     print("已将单号 %s 合计金额改为 %s" % (args.id, args.amount))
 
 
+def cmd_audit(args):
+    """全库对账：每张入库单 表头合计 vs 明细合计。漏行/差一分钱都揪出来。"""
+    bad = 0
+    for rid in db.receipt_ids():
+        r = db.get_receipt(rid)
+        items = r.get("items") or []
+        s = round(sum(float(i.get("amount") or 0) for i in items), 2)
+        t = float(r.get("total") or 0)
+        if abs(s - t) > 1:
+            bad += 1
+            print("[不符] %s 表头%.2f vs 明细%d行合计%.2f（差%.2f）" % (rid, t, len(items), s, t - s))
+    print("审计完成：%d 张入库单，%d 张不符" % (len(db.receipt_ids()), bad))
+    raise SystemExit(1 if bad else 0)
+
+
 def main():
     ap = argparse.ArgumentParser(description="单据库维护工具")
     sub = ap.add_subparsers(dest="cmd")
@@ -136,7 +175,7 @@ def main():
     p.add_argument("id")
     p.set_defaults(fn=cmd_show)
 
-    p = sub.add_parser("add", help="缺单号补录（交互式或 --item）")
+    p = sub.add_parser("add", help="缺单号补录（交互式或 --item，须带 --total 表头合计对账）")
     p.add_argument("id")
     p.add_argument("--date")
     p.add_argument("--supplier")
@@ -144,6 +183,9 @@ def main():
     p.add_argument("--total", type=fl)
     p.add_argument("--item", action="append")
     p.set_defaults(fn=cmd_add)
+
+    p = sub.add_parser("audit", help="全库对账：表头合计 vs 明细合计")
+    p.set_defaults(fn=cmd_audit)
 
     p = sub.add_parser("usage", help="补/改发票用途")
     p.add_argument("filename")

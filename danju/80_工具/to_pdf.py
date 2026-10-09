@@ -51,27 +51,33 @@ def main():
 
     print("待转换 %d 个文件（Word 组件逐个导出，请勿关闭 Word）" % len(todo))
     ok, fail = 0, []
+    # 短名副本放系统临时目录且带本次运行 pid：30_待打印 里旧的 _tN.docx
+    # 可能被僵死 Word 占着，撞名会让 copy2 直接崩
+    import shutil, tempfile
+    tdir = os.path.join(tempfile.gettempdir(), "danju_pdf_%d" % os.getpid())
+    os.makedirs(tdir, exist_ok=True)
     for i, p in enumerate(todo, 1):
         name = os.path.basename(p)
         # 长文件名+全角括号会让 Word 拒写输出：复制为短临时名转换，再改回目标名
         ext = os.path.splitext(p)[1]
-        short_p = os.path.join(out_dir, "_t%d%s" % (i, ext))
-        import shutil
+        short_p = os.path.join(tdir, "_t%d%s" % (i, ext))
         shutil.copy2(p, short_p)
         try:
-            done = _docx_to_pdf(short_p, out_dir)
-            produced = os.path.join(out_dir, os.path.splitext(os.path.basename(short_p))[0] + ".pdf")
+            # 转换在临时目录完成短名 PDF，再改名落到目标目录（长名直写会被 Word 拒）
+            done = _docx_to_pdf(short_p, tdir)
+            produced = os.path.join(tdir, "_t%d.pdf" % i)
             target = os.path.join(out_dir, os.path.splitext(name)[0] + ".pdf")
-            if os.path.exists(produced) and produced != target:
-                os.replace(produced, target)
+            if done and os.path.exists(produced):
+                shutil.move(produced, target)   # 跨盘：C 临时目录 → D 工作区
         except Exception as e:
             done = False
             print("  [%d/%d] %s -> 异常: %s" % (i, len(todo), name, e))
         finally:
-            try:
-                os.remove(short_p)
-            except OSError:
-                pass
+            for junk in (short_p, os.path.join(tdir, "_t%d.pdf" % i)):
+                try:
+                    os.remove(junk)
+                except OSError:
+                    pass
         if done:
             print("  [%d/%d] %s -> PDF 完成" % (i, len(todo), name))
             ok += 1
@@ -79,6 +85,10 @@ def main():
             print("  [%d/%d] %s -> [WARNING] 转换失败" % (i, len(todo), name))
             fail.append(name)
     print("\n完成：%d 成功 / %d 失败" % (ok, len(fail)))
+    try:
+        shutil.rmtree(tdir, ignore_errors=True)
+    except OSError:
+        pass
     if fail:
         print("失败清单：" + ", ".join(fail))
 

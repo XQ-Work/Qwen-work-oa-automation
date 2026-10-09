@@ -1233,10 +1233,24 @@ def _strip_revisions(docx_path):
     os.replace(tmp, docx_path)
 
 
+def _winword_pids():
+    raw = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq WINWORD.EXE', '/FO', 'CSV'],
+                         capture_output=True).stdout.decode('gbk', 'replace')
+    pids = set()
+    for ln in raw.splitlines()[1:]:
+        m = re.match(r'^"WINWORD\.EXE","(\d+)"', ln.strip())
+        if m:
+            pids.add(int(m.group(1)))
+    return pids
+
+
 def _docx_to_pdf(docx_path, out_dir):
-    """docx 转 PDF：优先本机 Word 组件，回退 soffice。返回是否成功。"""
+    """docx 转 PDF：优先本机 Word 组件，回退 soffice。返回是否成功。
+    COM 的 Word 不暴露 pid，Quit 又常因残留对话框僵而不死：
+    开跑前拍快照、结束后差集强杀，杜绝无窗口僵尸占源文件。"""
     pdf_name = os.path.splitext(os.path.basename(docx_path))[0] + '.pdf'
     pdf_path = os.path.join(out_dir, pdf_name)
+    before = _winword_pids()
     try:
         import win32com.client
         _strip_revisions(docx_path)
@@ -1253,12 +1267,19 @@ def _docx_to_pdf(docx_path, out_dir):
             doc.ExportAsFixedFormat(pdf_path, 17)  # 17 = wdExportDocumentPDF
             doc.Close(False)
         finally:
-            word.Quit()
+            try:
+                word.Quit()
+            except Exception:
+                pass
+        for pid in _winword_pids() - before:
+            subprocess.run(['taskkill', '/PID', str(pid), '/F'], capture_output=True)
+            print("  Word 进程 %d 未随 Quit 退出，已强杀" % pid)
         return os.path.exists(pdf_path)
     except Exception as e:
-        print("  Word 组件转换失败，尝试 soffice: %s" % e)
-        subprocess.run(['soffice', '--headless', '--convert-to', 'pdf', '--outdir', out_dir, docx_path],
-                       capture_output=True)
+        for pid in _winword_pids() - before:
+            subprocess.run(['taskkill', '/PID', str(pid), '/F'], capture_output=True)
+        print("  Word 组件转换失败: %s" % e)
+        print("  提示：本机无 LibreOffice；请检查是否有僵死 WINWORD 后重试 to_pdf.py")
         return os.path.exists(pdf_path)
 
 
