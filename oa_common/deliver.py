@@ -20,7 +20,7 @@ from oa_common import paths
 MANIFEST = paths.STATE / "delivery_manifest.json"
 TMP = paths.STATE / "deliv_tmp"
 # 台账双存（用户规矩）：主份在 记录/台账/，副本随功能夹；两处分身同步追记
-LEDGERS = [paths.DATA / "记录/台账/交付台账.xlsx", paths.DELIVER / "交付台账.xlsx"]
+LEDGERS = [paths.DATA / "记录/台账/06_交付台账.xlsx", paths.DELIVER / "交付台账.xlsx"]
 LEDGER_HEAD = ["生成时间", "功能", "事项", "交付文件", "成员数", "页数", "成员清单", "备注"]
 
 

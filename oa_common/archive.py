@@ -140,24 +140,33 @@ def remove_browse_folder(code):
 
 
 # ---------- 台账快照：整套记录型台账随档留一份 ----------
-_SNAP_FILES = ["事项审批发起台账.xlsx", "供应商建档台账.xlsx", "合同发起台账.xlsx",
-               "付款发起台账.xlsx", "交付台账.xlsx", "申购单需求台账.xlsx"]
+# 通配“记录/台账”里所有含“台账”的 .xlsx（自动适配 01_~06_ 前缀），归档台账另计不重复。
+_SNAP_EXCLUDE = "归档台账"        # 归档台账已是 归档/归档台账.xlsx 分身，不再进快照
 _SNAP_SUBDIRS = ["单据流水"]      # 采购台账_YYYY / 付款台账_YYYY（真实账号原样随档，用户本机）
 
 
 def refresh_snapshots(dry=False):
-    """把 记录/台账 的整套记录型台账 + 进度总览刷新进 归档/台账快照；归档台账本就有副本。"""
+    """把 记录/台账 的整套记录型台账 + 进度总览刷新进 归档/台账快照。
+    改名/换前缀后残留的旧快照副本移入 state/快照旧版回收（零删除），保持快照与源一致。"""
     snap = paths.DATA / "归档/台账快照（随档留一份）"
     src_led = _ledger_dir()
+    src_files = [f for f in sorted(src_led.glob("*.xlsx"))
+                 if "台账" in f.name and _SNAP_EXCLUDE not in f.name and not f.name.startswith("~")]
+    want = {f.name for f in src_files}
     copied = []
     if not dry:
         snap.mkdir(parents=True, exist_ok=True)
-    for name in _SNAP_FILES:
-        s = src_led / name
-        if s.exists():
-            if not dry:
-                shutil.copy2(str(s), str(snap / name))
-            copied.append(name)
+        # 清掉源里已不存在的旧快照（改名/删除导致）
+        stale = paths.STATE / "快照旧版回收"
+        for g in snap.glob("*.xlsx"):
+            if g.name not in want and not g.name.startswith("~"):
+                stale.mkdir(parents=True, exist_ok=True)
+                g.rename(stale / f"{datetime.datetime.now():%Y%m%d-%H%M%S}-{g.name}")
+        for f in src_files:
+            shutil.copy2(str(f), str(snap / f.name))
+            copied.append(f.name)
+    else:
+        copied = [f.name for f in src_files]
     for sub in _SNAP_SUBDIRS:
         sdir = src_led / sub
         if sdir.is_dir():
