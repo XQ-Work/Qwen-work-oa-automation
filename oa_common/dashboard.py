@@ -75,20 +75,34 @@ def _rows(path, sheet):
 
 
 def load_data():
-    """项目档案目录 + 三台账 + 队列 + 主档，按项目编号归组。"""
+    """项目档案目录 + 三台账 + 队列 + 主档，按项目编号归组。
+    双轨后：任务轨(记录/项目档案)是结构与附件识别基准；归档架上只是定稿册，
+    仅用于把同编号标记为已归档，绝不覆盖 dir/files。"""
     projs = {}
-    for root, archived in ((paths.ARCHIVE, False),
-                           (paths.ARCHIVED_SMALL, True), (paths.ARCHIVED_LARGE, True)):
+    if paths.ARCHIVE.is_dir():
+        for d in sorted(paths.ARCHIVE.iterdir()):
+            if d.is_dir() and re.match(r"^\d{4}-\d{3}-", d.name):
+                code, matter = moneyline.code_from_path(d.name)
+                projs[code] = dict(code=code, matter=matter, dir=d, files={},
+                                   m02=[], m05=[], m06=[], archived=False)
+                for sub in d.rglob("*"):
+                    if sub.is_file():
+                        projs[code]["files"].setdefault(sub.parent.name[:2], []).append(sub)
+    # 归档架：有该编号定稿册 → 标记已归档
+    for root in (paths.ARCHIVED_SMALL, paths.ARCHIVED_LARGE):
         if not root.is_dir():
             continue
         for d in sorted(root.iterdir()):
             if d.is_dir() and re.match(r"^\d{4}-\d{3}-", d.name):
                 code, matter = moneyline.code_from_path(d.name)
-                projs[code] = dict(code=code, matter=matter, dir=d, files={},
-                                   m02=[], m05=[], m06=[], archived=archived)
-                for sub in d.rglob("*"):
-                    if sub.is_file():
-                        projs[code]["files"].setdefault(sub.parent.name[:2], []).append(sub)
+                if code in projs:
+                    projs[code]["archived"] = True
+                else:   # 架上有、任务轨已不在（异常/历史）：以架上册兜底登记
+                    projs[code] = dict(code=code, matter=matter, dir=d, files={},
+                                       m02=[], m05=[], m06=[], archived=True)
+                    for sub in d.rglob("*"):
+                        if sub.is_file():
+                            projs[code]["files"].setdefault(sub.parent.name[:2], []).append(sub)
     def link(rows, key, proj_col, name_cols):
         for r in rows:
             code = str(r[proj_col - 1] if len(r) >= proj_col else "").strip()

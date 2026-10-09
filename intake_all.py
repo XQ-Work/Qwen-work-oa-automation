@@ -659,9 +659,20 @@ def cmd_reflow(dry=False):
             print(f"  {f.name}  ({why})")
 
 
+def _split_code(code_or_folder):
+    """把 '2026-005' / '2026-005-事项名' / '2026-005-事项名〔办结…〕' 归一为 (code, folder_for_matter)。"""
+    m = re.match(r"^(\d{4}-\d{3})", code_or_folder.strip())
+    code = m.group(1) if m else code_or_folder.strip()
+    return code
+
+
 def cmd_archive(code, reason="", undo=False):
-    """项目办结归档 / 归档取出。归档=整夹移动+双台账记行；取出=原路返回。
+    """双轨归档 / 取出。归档=记录/项目档案原地不动，从交付区组装定稿册进归档架 + 记台账卡片 +
+    刷台账快照；取出=把定稿册移入 运行/state/归档取出回收 并删台账卡片行。全系统零删除。
     code 支持 2026-NNN 前缀或完整夹名。"""
+    from oa_common import archive as arc
+    code = _split_code(code)
+
     def locate(root, want):
         if not Path(root).is_dir():
             return None
@@ -669,35 +680,46 @@ def cmd_archive(code, reason="", undo=False):
             if d.is_dir() and (d.name == want or d.name.startswith(want + "-")):
                 return d
         return None
-    shelves = [paths.ARCHIVED_SMALL, paths.ARCHIVED_LARGE]
-    a = next((x for x in (locate(r, code) for r in shelves) if x), None)
-    s = locate(paths.ARCHIVE, code)
+
+    src = locate(paths.ARCHIVE, code)                       # 任务轨源夹（过程全量）
+    old = next((x for x in (locate(r, code)
+                            for r in (paths.ARCHIVED_SMALL, paths.ARCHIVED_LARGE)) if x), None)
+
     if undo:
-        if not a:
-            print("归档里没有:", code)
+        moved = arc.remove_browse_folder(code)
+        if not moved:
+            print("归档架里没有:", code)
             return 1
-        paths.ARCHIVE.mkdir(parents=True, exist_ok=True)
-        a.rename(paths.ARCHIVE / a.name); act = "取出回 记录/项目档案"
-    else:
-        if not s:
-            print("项目档案里没有:", code)
-            return 1
-        amt = _shelf_amount(s.name)
-        big = amt is not None and amt >= 2000
-        tgt = (paths.ARCHIVED_LARGE if big else paths.ARCHIVED_SMALL)
-        tgt.mkdir(parents=True, exist_ok=True)
-        s.rename(tgt / s.name)
-        act = f"移入 {'采购合同' if big else '日常采购'}（金额{amt if amt is not None else '未知,归日常'}）"
-    if undo:
-        _archive_del_row(a.name)
-    else:
-        _archive_write_row(tgt, s.name, reason)
+        _archive_del_row(code)
+        arc.refresh_snapshots()
+        try:
+            from oa_common import dashboard
+            dashboard.build()
+        except Exception:
+            pass
+        print(f"[取出] {code} 定稿册已移入 运行/state/归档取出回收（记录/项目档案未受影响），台账卡片行已删")
+        return 0
+
+    if not src and not old:
+        print("项目档案里没有:", code)
+        return 1
+    folder = (src or old).name
+    code2, matter = arc._code_matter(folder)
+    amt = _shelf_amount(folder)
+    big = amt is not None and amt >= 2000
+    shelf = paths.ARCHIVED_LARGE if big else paths.ARCHIVED_SMALL
+    if old:                                                   # 换架/重归：先回收旧册
+        arc.remove_browse_folder(code)
+    dest, files = arc.build_browse_folder(code, matter, amt, big)
+    _archive_write_row(shelf, f"{code}-{matter}", reason)
+    snap = arc.refresh_snapshots()
     try:
         from oa_common import dashboard
         dashboard.build()
     except Exception:
         pass
-    print(f"[归档] {code} {act}（原因：{reason or '办结'}）")
+    print(f"[归档] {code} {matter} → {dest.parent.name}/{dest.name}（金额{amt if amt is not None else '未知,归日常'}）")
+    print(f"  定稿册 {len(files)} 份（取自交付区）；台账快照刷新 {len(snap)} 项")
     return 0
 
 
