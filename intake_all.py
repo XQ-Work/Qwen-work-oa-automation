@@ -718,8 +718,12 @@ def cmd_archive(code, reason="", undo=False):
         dashboard.build()
     except Exception:
         pass
+    paid = arc.is_paid(matter)
     print(f"[归档] {code} {matter} → {dest.parent.name}/{dest.name}（金额{amt if amt is not None else '未知,归日常'}）")
+    print(f"  {'✓ 银行回单已到 → 办结' if paid else '… 银行回单未到 → 归档·待付（末格已留回单待补占位）'}")
     print(f"  定稿册 {len(files)} 份（取自交付区）；台账快照刷新 {len(snap)} 项")
+    if not paid:
+        print("  回单到后重跑 `archive " + code + "` 即自动补入回单并把本册升级为〔办结〕")
     return 0
 
 

@@ -88,18 +88,21 @@ def load_data():
                 for sub in d.rglob("*"):
                     if sub.is_file():
                         projs[code]["files"].setdefault(sub.parent.name[:2], []).append(sub)
-    # 归档架：有该编号定稿册 → 标记已归档
+    # 归档架：〔办结〕册才算已归档(灰、不催)；〔归档·待付〕册=已入档但钱未清，保持在途催回单
     for root in (paths.ARCHIVED_SMALL, paths.ARCHIVED_LARGE):
         if not root.is_dir():
             continue
         for d in sorted(root.iterdir()):
             if d.is_dir() and re.match(r"^\d{4}-\d{3}-", d.name):
                 code, matter = moneyline.code_from_path(d.name)
+                done = "办结" in d.name
                 if code in projs:
-                    projs[code]["archived"] = True
+                    projs[code]["archived"] = done
+                    projs[code]["filed_pending"] = not done
                 else:   # 架上有、任务轨已不在（异常/历史）：以架上册兜底登记
                     projs[code] = dict(code=code, matter=matter, dir=d, files={},
-                                       m02=[], m05=[], m06=[], archived=True)
+                                       m02=[], m05=[], m06=[], archived=done,
+                                       filed_pending=not done)
                     for sub in d.rglob("*"):
                         if sub.is_file():
                             projs[code]["files"].setdefault(sub.parent.name[:2], []).append(sub)

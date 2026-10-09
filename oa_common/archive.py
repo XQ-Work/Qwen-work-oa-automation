@@ -28,9 +28,11 @@ BROWSE_ORDER = [
     ("__合同__", "采购合同"),          # 特殊：优先用印合同，回退未盖章采购合同
     ("流程会签", "流程会签"),
     ("发票", "发票"),
-    ("__回单__", "银行回单"),      # 真实付款凭证，从回单区取
     ("其他", "其他"),
 ]
+# 银行回单永远占最后格：到=真实付款凭证→〔办结〕；未到=放待补占位→〔归档·待付〕，
+# 回单到后重跑归档自动补入并升级。
+RECEIPT_LABEL = "银行回单"
 # 生成物料（送签/做账表单，非真实凭证）：单列一组，进册末尾「生成物料」子夹并标注
 GEN_ITEMS = [
     ("验收单", "验收单"),
@@ -89,8 +91,14 @@ def _resolve(item, matter):
     return _latest_deliver(func, matter), label
 
 
+def is_paid(matter):
+    """付款态：回单到=已付清=办结（回单是权威事件，金额链随后核平）。"""
+    return _latest_receipt(matter) is not None
+
+
 def build_browse_folder(code, matter, amt, big, done_date=None, dry=False):
-    """从交付区/回单区组装一册定稿 → 归档/架/code-matter〔办结〕。
+    """从交付区/回单区组装一册定稿 → 归档/架/code-matter〔状态+日期〕。
+    回单到→〔办结〕；未到→〔归档·待付〕且末格留“银行回单（待补）”占位。
     主件按业务顺序进册根；验收单/付款单等生成物料单列「生成物料」子夹并标注。"""
     done_date = done_date or datetime.date.today().strftime("%Y%m%d")
     shelf = paths.ARCHIVED_LARGE if big else paths.ARCHIVED_SMALL
@@ -99,20 +107,39 @@ def build_browse_folder(code, matter, amt, big, done_date=None, dry=False):
     except (TypeError, ValueError):
         amt_disp = amt
     amt_tag = f"·金额：{amt_disp}" if amt_disp not in (None, "") else ""
-    dest = shelf / f"{code}-{matter}〔办结{done_date}〕"
+    receipt = _latest_receipt(matter)
+    state = "办结" if receipt else "归档·待付"
+    dest = shelf / f"{code}-{matter}〔{state}{done_date}〕"
     picked = []
 
-    def emit(items, target_dir):
-        avail = [r for r in (_resolve(it, matter) for it in items) if r[0]]
-        for k, (src, label) in enumerate(avail):
-            out = target_dir / f"{_ord(k)}{label}（{matter}{amt_tag}）{src.suffix}"
+    def emit(items, target_dir, start=0):
+        """按连续序号写主件/生成物料，返回下一个可用序号。"""
+        k = start
+        for it in items:
+            src, _ = _resolve(it, matter)
+            if not src:
+                continue
+            out = target_dir / f"{_ord(k)}{it[1]}（{matter}{amt_tag}）{src.suffix}"
             if not dry:
                 target_dir.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(str(src), str(out))
             picked.append(src)
+            k += 1
+        return k
 
-    emit(BROWSE_ORDER, dest)                # 主件（真实/生效凭证）
-    emit(GEN_ITEMS, dest / GEN_SUBDIR)      # 生成物料：单列子夹
+    nxt = emit(BROWSE_ORDER, dest)           # 主件（真实/生效凭证）
+    # 银行回单永远占末格
+    if receipt:
+        out = dest / f"{_ord(nxt)}{RECEIPT_LABEL}（{matter}{amt_tag}）{receipt.suffix}"
+        if not dry:
+            shutil.copy2(str(receipt), str(out))
+        picked.append(receipt)
+    elif not dry:
+        (dest / f"{_ord(nxt)}{RECEIPT_LABEL}（待补·回单到即自动补入并升级办结）.txt").write_text(
+            "本单交付文档已归档，但银行回单尚未收到，付款未确认。\n"
+            "回单一到，重跑 `archive {code}`（或 m07 回单归位）即自动把回单补进本格，"
+            "并把本册从〔归档·待付〕升级为〔办结〕。".format(code=code), encoding="utf-8")
+    emit(GEN_ITEMS, dest / GEN_SUBDIR)       # 生成物料：单列子夹
     return dest, picked
 
 
