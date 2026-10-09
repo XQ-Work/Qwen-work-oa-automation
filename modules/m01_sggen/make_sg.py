@@ -28,7 +28,7 @@ from oa_common import paths
 
 from openpyxl import load_workbook
 from openpyxl.cell.cell import MergedCell
-from openpyxl.utils import column_index_from_string
+from openpyxl.utils import column_index_from_string, get_column_letter
 
 BASE = paths.STATE
 TPL_DIR = paths.TPL_SG
@@ -107,13 +107,25 @@ def gen(req):
         ws.cell(row=r, column=c_unit, value=item.get("单位", ""))
         ws.cell(row=r, column=c_qty, value=item.get("数量", ""))
         ws.cell(row=r, column=c_note, value=item.get("备注", ""))
-        # 名称/规格过长会折行：按折行数抬高行高，避免固定行高把第二行裁掉
-        import math
-        disp = lambda s: sum(1 if ord(ch) > 0x2E80 else 0.55 for ch in str(s))
-        lines = max(math.ceil(disp(item.get("名称", "")) / 8),
-                    math.ceil(disp(item.get("规格", "")) / 9), 1)
-        if lines > 1:
-            ws.row_dimensions[r].height = 15 * lines + 4
+
+    # 明细区格式统一：全区间居中+自动换行；每行按自身内容定高（普通行同高，仅折行那行抬高）
+    import math
+    from openpyxl.styles import Alignment
+    _disp = lambda s: sum(1 if ord(ch) > 0x2E80 else 0.55 for ch in str(s))
+    _w = {c: (ws.column_dimensions[get_column_letter(c)].width or 8.43) for c in (c_name, c_spec)}
+    _cap = {c: max(4, int(_w[c] / 2)) for c in (c_name, c_spec)}   # 每行大约容纳的汉字数
+    for r in range(first, last + 1):
+        lines = 1
+        if r < first + len(rows):
+            it = rows[r - first]
+            lines = max(math.ceil(_disp(it.get("名称", "")) / _cap[c_name]),
+                        math.ceil(_disp(it.get("规格", "")) / _cap[c_spec]), 1)
+        ws.row_dimensions[r].height = 15 * lines + 6
+        for c in range(1, ws.max_column + 1):
+            cell = ws.cell(row=r, column=c)
+            if isinstance(cell, MergedCell):
+                continue
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
     INBOX.mkdir(parents=True, exist_ok=True)
     out = INBOX / f"申购单（{name}-金额：{_fmt_amt(amt)}）.xlsx"
