@@ -1606,13 +1606,15 @@ if has_receipt_unpaid and has_tpl_pay and has_db:
             segs.append((" 万 ", "unit"))
             digits = [yuan // 1000, (yuan % 1000) // 100, (yuan % 100) // 10, yuan % 10, jiao, fen]
             hi = next((k for k in range(4) if digits[k] != 0), 3)   # 最高有效位下标(元位兜底)
+            if hi == 0:
+                segs.append(("￥", "rmb"))                          # 仟为最高位：￥放万位后、仟前
             for k in range(6):
-                if k < hi:
-                    segs.append(("    ", "num"))                    # 高位留空
-                elif k == hi:
-                    segs.append(("￥" + cn_digits[digits[k]], "rmb"))  # ¥ 移到最高位前
+                if k < hi - 1:
+                    segs.append(("    ", "num"))                    # 更左的高位留空
+                elif k == hi - 1:
+                    segs.append(("￥", "rmb"))                      # ￥占最高位左一格
                 else:
-                    segs.append((cn_digits[digits[k]], "rmb"))
+                    segs.append((cn_digits[digits[k]], "rmb"))      # 最高位及其右逐格填
                 segs.append((_units[k], "unit"))
             segs.append(("￥ ", "rmb"))
             digits = None   # 本分支已逐格填好，跳过下方通用填充（避免重复）
