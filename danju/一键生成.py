@@ -1637,7 +1637,7 @@ if has_receipt_unpaid and has_tpl_pay and has_db:
                 segs.append((cn_digits[dv], "rmb"))
                 segs.append((u, "unit"))
             segs.append(("￥ ", "rmb"))
-        segs.append((num_txt, "num"))
+        segs.append((num_txt, "rmb"))   # 小写金额也加粗（宋体12）
 
         # 重建 si[13] 的 run 序列（只给“大写数字/￥”套宋体12加粗，其余沿用模板原样式）
         for r in _runs_orig:
