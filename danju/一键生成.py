@@ -1601,11 +1601,21 @@ if has_receipt_unpaid and has_tpl_pay and has_db:
         segs = []  # (text, kind)  kind: label | unit | rmb | num
         digits = None
         if yuan < 10000:
-            # 整数≤4位：行首￥占“万”前位（原样），仟佰拾元角分逐格填写
+            # 整数≤4位：万位空，¥ 紧跟最高有效位（仟/佰/拾/元）前，其上位留空不写零
             segs.append(("付款金额(大写):     仟   佰  拾 ", "label"))
-            segs.append(("￥", "rmb"))
             segs.append((" 万 ", "unit"))
-            digits = [yuan//1000, (yuan%1000)//100, (yuan%100)//10, yuan%10, jiao, fen]
+            digits = [yuan // 1000, (yuan % 1000) // 100, (yuan % 100) // 10, yuan % 10, jiao, fen]
+            hi = next((k for k in range(4) if digits[k] != 0), 3)   # 最高有效位下标(元位兜底)
+            for k in range(6):
+                if k < hi:
+                    segs.append(("    ", "num"))                    # 高位留空
+                elif k == hi:
+                    segs.append(("￥" + cn_digits[digits[k]], "rmb"))  # ¥ 移到最高位前
+                else:
+                    segs.append((cn_digits[digits[k]], "rmb"))
+                segs.append((_units[k], "unit"))
+            segs.append(("￥ ", "rmb"))
+            digits = None   # 本分支已逐格填好，跳过下方通用填充（避免重复）
         elif yuan < 100000:
             # 有万位(1万~9.99万)：行首￥前移进标签空档，￥后填万位，再仟佰拾元角分
             segs.append(("付款金额(大写):     仟   佰 ", "label"))
