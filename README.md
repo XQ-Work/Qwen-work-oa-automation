@@ -49,6 +49,7 @@ python intake_all.py flush          # 攒批发草稿（开浏览器，失败留
 python intake_all.py status         # 队列/收件箱/异常一览
 python intake_all.py verify --project 2026-005   # 单项目齐套核对
 python intake_all.py archive --project 2026-005  # 归档（交付齐即入架·待付；回单到重跑升〔办结〕，--undo 取出）
+python tools/pay_pack.py 2026-003 --pay <本次付款单.pdf>  # 付款资料装配：按必备清单挑齐→交付/<事项>付款/，缺的点名
 python tools/retire_input.py "输入/申购单.xlsx"    # 收尾：用过的投料源件退役到 记录/已用投料（带日期，零删除）
 python -m oa_common.moneyline report             # 金额对账
 python -m oa_common.docindex search 质保金        # 全文检索附件内容
