@@ -113,9 +113,42 @@ PAY_PATTERNS = [
 ]
 
 
+# 交付功能目录 -> 项目06标准材料名（付款装配前，把只在交付区的成品回补进项目夹）
+DELIVER_SYNC = {"发票": ["发票"], "付款单": ["付款单"], "采购合同": ["用印合同", "采购合同"],
+                "流程会签": ["流程会签"], "事项审批": ["事项审批"]}
+
+
+def sync_deliver_into_project(项目名):
+    """交付区有、但整个项目夹都缺的成品，按标准名复制进 06_付款及验收/。
+    项目里(01~06任一夹)已存在同类的就不再补，避免重复。"""
+    import shutil
+    proj = next((d for d in sorted(paths.ARCHIVE.iterdir())
+                 if d.is_dir() and 项目名 in d.name), None)
+    if not proj:
+        return
+    have = {lbl for lbl, pats in PAY_PATTERNS
+            if any(proj.rglob(p.format(项目名)) for p in pats)}   # 项目里已有的类别
+    dst = proj / "06_付款及验收"
+    for cat, funcs in DELIVER_SYNC.items():
+        if cat in have:                       # 已在项目某夹，不重复补
+            continue
+        want = dst / f"{cat}（{项目名}）.pdf"
+        if want.exists():
+            continue
+        for func in funcs:
+            d = paths.DELIVER / func
+            hits = [f for f in d.glob("*.pdf") if 项目名 in f.name] if d.is_dir() else []
+            if hits:
+                dst.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(sorted(hits)[-1], str(want))
+                print(f"[sync] 交付/{func} -> 06_付款及验收/{want.name}")
+                break
+
+
 def resolve_pay_attachments(项目名, root=None):
     """按项目名在付款附件根目录递归找 5 必传件（每类多模式，命中任一即可）。
     返回 (files:list[Path], missing:list[str])。"""
+    sync_deliver_into_project(项目名)   # 先回补交付区成品，避免漏发票/付款单
     root = Path(root or ATTACH_PAY_ROOT)
     files, missing = [], []
     for label, pats in PAY_PATTERNS:
