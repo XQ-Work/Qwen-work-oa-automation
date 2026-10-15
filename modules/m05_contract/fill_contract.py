@@ -462,18 +462,21 @@ def browser_select(page, frame, fid, keyword, tag):
         box.first.click(force=True, timeout=6000)
         page.keyboard.type(keyword, delay=90)
         page.keyboard.press("Backspace")   # 删1字触发 keyup 联想查询
-        time.sleep(1.8)
         pre = keyword[:4] if len(keyword) > 4 else keyword
         picked = False
-        for sel in ("li", "a", "td", "div"):
-            try:
-                loc = frame.locator(f"{sel}:visible").filter(has_text=pre)
-                if loc.count() > 0:
-                    loc.first.click(force=True, timeout=3000)
-                    picked = True
-                    break
-            except Exception:
-                continue
+        # 轮询等联想下拉出现（结果多时渲染慢，固定1.8s易误判未命中→重试重复输入）
+        deadline = time.time() + 6.0
+        while time.time() < deadline and not picked:
+            time.sleep(0.6)
+            for sel in ("li", "a", "td", "div"):
+                try:
+                    loc = frame.locator(f"{sel}:visible").filter(has_text=pre)
+                    if loc.count() > 0:
+                        loc.first.click(force=True, timeout=3000)
+                        picked = True
+                        break
+                except Exception:
+                    continue
         time.sleep(1.5)
         try:
             v = frame.locator(f"input[name={fid}]").first.input_value()
